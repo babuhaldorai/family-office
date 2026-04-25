@@ -1,0 +1,67 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Only allow Gmail accounts ─────────────────────────────────────────
+    function isGmail() {
+      return request.auth.token.email.matches('.*@gmail[.]com');
+    }
+
+    function isSignedIn() {
+      return request.auth != null && isGmail();
+    }
+
+    function myUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isApproved() {
+      return isSignedIn() && myUserDoc().exists;
+    }
+
+    function isAdmin() {
+      return isApproved() && myUserDoc().data.role == 'admin';
+    }
+
+    function isViewer() {
+      return isApproved() && (
+        myUserDoc().data.role == 'viewer' ||
+        myUserDoc().data.role == 'admin'
+      );
+    }
+
+    // ── Users (allowlist) ─────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read:       if isSignedIn() && request.auth.uid == userId;
+      allow read, write: if isAdmin();
+    }
+
+    // ── Pending login attempts ────────────────────────────────────────────
+    match /pending_logins/{uid} {
+      allow create, update: if isSignedIn() && request.auth.uid == uid;
+      allow read, delete:   if isAdmin();
+    }
+
+    // ── Tea Plantation ────────────────────────────────────────────────────
+    match /tea_harvest/{id}        { allow read: if isViewer(); allow write: if isAdmin(); }
+    match /tea_market_rates/{id}   { allow read: if isViewer(); allow write: if isAdmin(); }
+    match /tea_settlements/{id}    { allow read: if isViewer(); allow write: if isAdmin(); }
+    match /tea_agent_payments/{id} { allow read: if isViewer(); allow write: if isAdmin(); }
+    match /tea_advances/{id}       { allow read: if isViewer(); allow write: if isAdmin(); }
+    match /tea_maintenance/{id}    { allow read: if isViewer(); allow write: if isAdmin(); }
+    match /tea_weather/{id}        { allow read: if isViewer(); allow write: if isAdmin(); }
+    match /workers/{id}            { allow read: if isViewer(); allow write: if isAdmin(); }
+    match /agents/{id}             { allow read: if isViewer(); allow write: if isAdmin(); }
+    match /fields/{id}             { allow read: if isViewer(); allow write: if isAdmin(); }
+
+    // ── Rental Homes ──────────────────────────────────────────────────────
+    match /properties/{id}          { allow read: if isViewer(); allow write: if isAdmin(); }
+    match /tenants/{id}             { allow read: if isViewer(); allow write: if isAdmin(); }
+    match /leases/{id}              { allow read: if isViewer(); allow write: if isAdmin(); }
+    match /rental_transactions/{id} { allow read: if isViewer(); allow write: if isAdmin(); }
+
+    // ── Home Maintenance ──────────────────────────────────────────────────
+    match /home_properties/{id} { allow read: if isViewer(); allow write: if isAdmin(); }
+    match /home_expenses/{id}   { allow read: if isViewer(); allow write: if isAdmin(); }
+  }
+}

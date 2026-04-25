@@ -1,0 +1,15 @@
+{
+  "indexes": [
+    { "collectionGroup": "tea_harvests", "queryScope": "COLLECTION",
+      "fields": [{"fieldPath":"year","order":"ASCENDING"},{"fieldPath":"date","order":"DESCENDING"}] },
+    { "collectionGroup": "tea_expenses", "queryScope": "COLLECTION",
+      "fields": [{"fieldPath":"year","order":"ASCENDING"},{"fieldPath":"date","order":"DESCENDING"}] },
+    { "collectionGroup": "tea_payments", "queryScope": "COLLECTION",
+      "fields": [{"fieldPath":"year","order":"ASCENDING"},{"fieldPath":"date","order":"DESCENDING"}] },
+    { "collectionGroup": "rental_transactions", "queryScope": "COLLECTION",
+      "fields": [{"fieldPath":"year","order":"ASCENDING"},{"fieldPath":"date","order":"DESCENDING"}] },
+    { "collectionGroup": "tenants", "queryScope": "COLLECTION",
+      "fields": [{"fieldPath":"propertyId","order":"ASCENDING"},{"fieldPath":"status","order":"ASCENDING"}] }
+  ],
+  "fieldOverrides": []
+}
