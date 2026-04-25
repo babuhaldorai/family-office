@@ -1,3 +1,5 @@
+import { db } from '../firebase';
+import { getDocs, query, collection, where } from 'firebase/firestore';
 import React, { useEffect, useState, useMemo } from 'react';
 import { rentalService } from '../utils/firestoreService';
 import { homeExpenseService } from '../utils/homeService';
@@ -37,15 +39,10 @@ export default function YOYPage() {
         const [rentTx, homeExp, harvest] = await Promise.all([
           rentalService.getTransactions(y),
           homeExpenseService.getByYear(y),
-          // Load from tea_harvest collection directly
-          (async () => {
-            try {
-              const { getDocs, query, collection, where } = await import('firebase/firestore');
-              const { db } = await import('../firebase');
-              const snap = await getDocs(query(collection(db, 'tea_harvest'), where('year', '==', y)));
-              return snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            } catch { return []; }
-          })(),
+          // Load tea harvest using statically imported db
+          getDocs(query(collection(db, 'tea_harvest'), where('year', '==', y)))
+            .then(snap => snap.docs.map(d => ({ id: d.id, ...d.data() })))
+            .catch(() => []),
         ]);
 
         const rentIncome  = rentTx.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);

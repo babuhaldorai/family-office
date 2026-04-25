@@ -1,6 +1,8 @@
 // TeaYOY.js — Year-over-Year comparison for Tea Plantation
 // Imported and rendered as a tab inside TeaPage
 import React, { useEffect, useState, useMemo } from 'react';
+import { db } from '../../firebase';
+import { getDocs, query, collection, where } from 'firebase/firestore';
 import { inr } from '../../utils/chaayaService';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, LineChart, Line } from 'recharts';
 
@@ -11,8 +13,7 @@ const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov
 
 async function loadTeaYear(year) {
   try {
-    const { getDocs, query, collection, where } = await import('firebase/firestore');
-    const { db } = await import('../../firebase');
+    // db and firestore imported statically at top
     const [hSnap, mSnap] = await Promise.all([
       getDocs(query(collection(db, 'tea_harvest'), where('year', '==', year))),
       getDocs(query(collection(db, 'tea_maintenance'), where('year', '==', year))),
@@ -146,7 +147,7 @@ export default function TeaYOY() {
 
       {/* Summary table */}
       <div className="card" style={{ padding: 0 }}>
-        <div style={{ padding: '14px 20px 0', fontFamily: 'var(--font-display)', fontSize: '1rem', fontWeight: 600 }}>Annual Summary Table</div>
+        <div style={{ padding: '14px 20px 0', fontSize: '1rem', fontWeight: 600 }}>Annual Summary Table</div>
         <div className="table-wrap">
           <table>
             <thead>
@@ -173,7 +174,7 @@ export default function TeaYOY() {
                   <tr key={row.label}>
                     <td style={{ fontWeight: 500 }}>{row.label}</td>
                     {data.map(yr => (
-                      <td key={yr.year} className={row.cls} style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: '0.875rem' }}>
+                      <td key={yr.year} className={row.cls} style={{ textAlign: 'right', fontSize: '0.875rem' }}>
                         {row.isFmt === false
                           ? (row.key === 'totalKg' ? yr[row.key].toFixed(1) + ' kg' : yr[row.key])
                           : inr(yr[row.key])}

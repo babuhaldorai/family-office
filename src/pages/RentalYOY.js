@@ -1,5 +1,7 @@
 // RentalYOY.js — Year-over-Year comparison for Rental Homes
 import React, { useEffect, useState, useMemo } from 'react';
+import { db } from '../firebase';
+import { getDocs, query, collection, where } from 'firebase/firestore';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, LineChart, Line } from 'recharts';
 
 const CUR   = new Date().getFullYear();
@@ -13,8 +15,7 @@ function fmt(n) {
 
 async function loadRentalYear(year) {
   try {
-    const { getDocs, query, collection, where } = await import('firebase/firestore');
-    const { db } = await import('../../firebase');
+    // db and firestore imported statically at top
     const snap = await getDocs(query(collection(db, 'rental_transactions'), where('year', '==', year)));
     const txs  = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
