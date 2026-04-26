@@ -83,7 +83,12 @@ export function MaintenanceTab({isAdmin,maintenance,workerList,fieldList,onSave,
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
   const save=async()=>{
     const rate=parseFloat(form.rate)||0,days=parseFloat(form.days)||1;
-    await onSave({...form,days,rate,cost:rate*days});
+    const d=form.date?new Date(form.date):new Date();
+    await onSave({
+      ...form,days,rate,cost:rate*days,
+      year:d.getFullYear(),
+      month:d.getMonth()+1,
+    });
     setForm(f=>({...f,rate:'',notes:''}));
   };
   const total=maintenance.reduce((s,e)=>s+(e.cost||0),0);

@@ -7,14 +7,12 @@ import {
 
 const NAV = [
   { section: 'Overview' },
-  { label: 'Dashboard',      icon: LayoutDashboard, path: '/' },
-  { label: 'Reports',        icon: FileText,         path: '/reports' },
-  { label: 'YOY Comparison', icon: TrendingUp,       path: '/yoy' },
+  { label: 'Overview',       icon: LayoutDashboard, path: '/' },
   { section: 'Tea Plantation' },
   { label: 'Tea Plantation', icon: Leaf,             path: '/tea' },
   { section: 'Rental Homes' },
   { label: 'Rental Homes',   icon: Home,             path: '/rentals' },
-  { section: 'Home Renovation' },
+  { section: 'Home Maintenance' },
   { label: 'Homes & Expenses', icon: Wrench,         path: '/homes' },
   { section: 'Admin', adminOnly: true },
   { label: 'User Management', icon: Settings,        path: '/admin', adminOnly: true },

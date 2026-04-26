@@ -1,11 +1,9 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import LoginPage from './pages/LoginPage';
-import Dashboard from './pages/Dashboard';
+import Overview from './pages/Overview';
 import TeaPage from './pages/TeaPage';
 import RentalsPage from './pages/RentalsPage';
-import ReportsPage from './pages/ReportsPage';
-import YOYPage from './pages/YOYPage';
 import AdminPage from './pages/AdminPage';
 import HomesPage from './pages/HomesPage';
 import Sidebar from './components/layout/Sidebar';
@@ -36,14 +34,14 @@ function AppShell() {
 
   const PageContent = () => {
     switch (page) {
-      case '/':           return <Dashboard />;
+      case '/':           return <Overview />;
       case '/tea':        return <TeaPage />;
       case '/rentals':    return <RentalsPage />;
-      case '/reports':    return <ReportsPage />;
-      case '/yoy':        return <YOYPage />;
+
+
       case '/admin':      return <AdminPage />;
       case '/homes':      return <HomesPage />;
-      default:            return <Dashboard />;
+      default:            return <Overview />;
     }
   };
 
