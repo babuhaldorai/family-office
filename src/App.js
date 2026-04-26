@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { LayoutDashboard, Leaf, Home, Wrench } from 'lucide-react';
 import LoginPage from './pages/LoginPage';
 import Overview from './pages/Overview';
 import TeaPage from './pages/TeaPage';
