@@ -191,7 +191,6 @@ export default function Overview() {
   const rTeaM=useMemo(()=>buildMonthlyPL(rTeaTx),[rTeaTx]);
   const rRentM=useMemo(()=>buildMonthlyPL(rRentTx),[rRentTx]);
   const rHomeM=useMemo(()=>buildMonthlyPL(homeToTx(rHomeExp)),[rHomeExp]);
-  const rCats=useMemo(()=>buildCategoryBreakdown(rAll),[rAll]);
   const rTotalInc=rMonthly.reduce((s,m)=>s+m.income,0);
   const rTotalExp=rMonthly.reduce((s,m)=>s+m.expense,0);
   const rNet=rTotalInc-rTotalExp;

@@ -48,24 +48,7 @@ export const AGENT_COLORS = [
   '#a78bfa',
 ];
 
-export function injectChaayaStyles() {
-  // styles are in global.css
-  return;
-  const el = document.createElement('style');
-  el.textContent = `
-/* ── Tea page: reuse global dark theme ── */
-.ch-page { font-family: var(--font-body); color: var(--text); }
-
-/* KPI grid */
-.ch-kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px; }
-.ch-kpi {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 20px;
-  position: relative;
-  overflow: hidden;
-}
+export function injectChaayaStyles() {}
 .ch-kpi::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; }
 .ch-kpi.green::before  { background: var(--success); }
 .ch-kpi.gold::before   { background: var(--accent); }
