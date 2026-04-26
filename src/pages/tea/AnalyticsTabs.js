@@ -1,12 +1,10 @@
 import React, { useMemo } from 'react';
 import { inr, agentStats, periodLabel, getFieldAcres } from '../../utils/chaayaService';
-import { C, AGENT_COLORS } from './chaayaStyles';
+
 import PeriodBar from './PeriodBar';
 
 // ── ANALYTICS TAB ─────────────────────────────────────────────────────────────
 export function AnalyticsTab({ anaH, anaPeriod, setAnaPeriod, fieldList, fields, maintenance }) {
-  const tGross  = anaH.reduce((s, e) => s + (e.tGross    || 0), 0);
-  const tLeak   = anaH.reduce((s, e) => s + (e.tWaterDed || 0) + (e.tBagDed || 0), 0);
   const tRev    = anaH.reduce((s, e) => s + (e.agentRev  || 0), 0);
   const tWages  = anaH.reduce((s, e) => s + (e.workerPay || 0), 0);
 

@@ -1,6 +1,6 @@
 import React from 'react';
-import {inr,weekLabel,todayStr} from '../../utils/chaayaService';
-import {C} from './chaayaStyles';
+import {inr} from '../../utils/chaayaService';
+
 import BagBuilder from './BagBuilder';
 
 export default function HarvestTab({

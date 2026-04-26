@@ -18,8 +18,8 @@
 
 import {
   collection, addDoc, updateDoc, deleteDoc,
-  doc, getDocs, query, orderBy, onSnapshot,
-  serverTimestamp, where,
+  doc, query, orderBy, onSnapshot,
+  serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 

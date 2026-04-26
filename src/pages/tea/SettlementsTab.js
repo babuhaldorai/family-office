@@ -1,5 +1,5 @@
 import React,{useState} from 'react';
-import {inr,workerUnpaidWages,agentPendingBreakdown} from '../../utils/chaayaService';
+import {inr,agentPendingBreakdown} from '../../utils/chaayaService';
 import {C} from './chaayaStyles';
 
 export default function SettlementsTab({

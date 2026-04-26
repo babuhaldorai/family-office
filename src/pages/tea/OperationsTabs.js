@@ -1,6 +1,6 @@
 import React,{useState} from 'react';
 import {inr,todayStr} from '../../utils/chaayaService';
-import {C} from './chaayaStyles';
+
 
 const MAINT_TASKS=['Pruning','Cleaning','Weeding','Fertilizing','Pest Control','Irrigation','Harvesting Equipment','Other'];
 

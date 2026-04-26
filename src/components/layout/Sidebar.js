@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
-  LayoutDashboard, Leaf, Home, FileText, TrendingUp,
+  LayoutDashboard, Leaf, Home,
   LogOut, Menu, X, Settings, Wrench,
 } from 'lucide-react';
 

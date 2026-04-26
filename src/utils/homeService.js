@@ -1,13 +1,13 @@
 /**
  * homeService.js
- * Firestore service for Home Renovation & Maintenance tracking.
+ * Firestore service for Home Maintenance & Maintenance tracking.
  * Collections:
  *   home_properties  — each house/property being renovated
  *   home_expenses    — individual expense entries per property
  */
 import {
   collection, addDoc, updateDoc, deleteDoc,
-  doc, getDocs, query, orderBy, where, Timestamp,
+  doc, getDocs, query, where, Timestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 

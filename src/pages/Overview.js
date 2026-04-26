@@ -77,29 +77,7 @@ function PeriodBar({periodKey,onChange}) {
   );
 }
 
-// ── Custom YOY tooltip ────────────────────────────────────────────────────────
-function YOYTooltip({active,payload,label}){
-  if(!active||!payload?.length) return null;
-  return(
-    <div style={{background:'var(--surface)',border:'1px solid var(--border2)',borderRadius:10,padding:'12px 16px',fontSize:12.5,minWidth:180,boxShadow:'0 4px 20px rgba(0,0,0,0.3)'}}>
-      <div style={{fontWeight:600,marginBottom:8,color:'var(--text)'}}>{label}</div>
-      {payload.map(p=>(
-        <div key={p.dataKey} style={{display:'flex',justifyContent:'space-between',gap:16,marginBottom:4}}>
-          <span style={{color:p.color||'var(--muted)'}}>{p.dataKey}</span>
-          <span style={{fontWeight:600,color:'var(--text)'}}>{fmt(p.value)}</span>
-        </div>
-      ))}
-      {payload[0]?.payload?.teaRevenue!==undefined&&(
-        <div style={{borderTop:'1px solid var(--border)',marginTop:8,paddingTop:8}}>
-          <div style={{color:'var(--muted)',fontSize:11,marginBottom:4}}>Breakdown:</div>
-          {payload[0].payload.teaRevenue>0&&<div style={{display:'flex',justifyContent:'space-between',gap:12,color:'var(--tea-light)',fontSize:11.5}}><span>🍃 Tea</span><span>{fmt(payload[0].payload.teaRevenue)}</span></div>}
-          {payload[0].payload.rentRevenue>0&&<div style={{display:'flex',justifyContent:'space-between',gap:12,color:'var(--rental-light)',fontSize:11.5}}><span>🏠 Rentals</span><span>{fmt(payload[0].payload.rentRevenue)}</span></div>}
-          {payload[0].payload.homeExpAmt>0&&<div style={{display:'flex',justifyContent:'space-between',gap:12,color:'var(--warn)',fontSize:11.5}}><span>🔧 Home Maint.</span><span>-{fmt(payload[0].payload.homeExpAmt)}</span></div>}
-        </div>
-      )}
-    </div>
-  );
-}
+
 
 export default function Overview() {
   const [mainTab, setMainTab]     = useState('dashboard');
@@ -218,8 +196,6 @@ export default function Overview() {
   const rTotalExp=rMonthly.reduce((s,m)=>s+m.expense,0);
   const rNet=rTotalInc-rTotalExp;
   const rHomeTotal=rHomeExp.reduce((s,e)=>s+Number(e.amount||0),0);
-  const rIncCats=rCats.filter(c=>c.type==='income').sort((a,b)=>b.amount-a.amount);
-  const rExpCats=rCats.filter(c=>c.type==='expense').sort((a,b)=>b.amount-a.amount);
   const rChartData=rMonthly.map(m=>({name:m.label,Income:m.income,Expenses:m.expense,Net:m.net}));
 
   // Segment-aware category breakdowns for Reports
@@ -314,7 +290,6 @@ export default function Overview() {
             {!dashLoading&&(()=>{
               // Derived expense breakdown for Tea
               const teaLabour = pTea.filter(t=>t.type==='expense'&&t.category==='Labour').reduce((s,t)=>s+Number(t.amount),0);
-              const teaMaint  = pTea.filter(t=>t.type==='expense'&&t.category!=='Labour').reduce((s,t)=>s+Number(t.amount),0);
               // Rental expense categories
               const rentExpCats = Object.entries(
                 pRent.filter(t=>t.type==='expense').reduce((acc,t)=>{acc[t.category||'Other']=(acc[t.category||'Other']||0)+Number(t.amount);return acc;},{})

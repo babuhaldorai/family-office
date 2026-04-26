@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { inr, kgFmt, periodLabel, getFieldAcres } from '../../utils/chaayaService';
-import { C, AGENT_COLORS } from './chaayaStyles';
+import { AGENT_COLORS } from './chaayaStyles';
 import PeriodBar from './PeriodBar';
 
 export default function DashboardTab({ dashH, dashPeriod, setDashPeriod, fields, agentList, maintenance, pendingRateSessions }) {
