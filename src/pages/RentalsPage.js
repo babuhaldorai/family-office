@@ -295,7 +295,7 @@ export default function RentalsPage() {
         </div>
       </div>
 
-      <div style={{ padding:'0 32px 32px' }}>
+      <div className="page-content-inner">
 
         {/* ── TABS (top, like Tea Plantation) ── */}
         <div className="tabs">

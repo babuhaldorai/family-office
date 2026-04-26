@@ -272,7 +272,7 @@ export default function Overview() {
         </div>
       </div>
 
-      <div style={{padding:'0 32px 32px'}}>
+      <div className="page-content-inner">
 
         {/* ── TOP TABS ── */}
         <div className="tabs">

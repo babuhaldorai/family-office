@@ -2,7 +2,7 @@ import React from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard, Leaf, Home,
-  LogOut, Menu, X, Settings, Wrench,
+  LogOut, Settings, Wrench,
 } from 'lucide-react';
 
 const NAV = [
@@ -31,18 +31,7 @@ export default function Sidebar({ active, onNavigate, mobileOpen, onToggleMobile
         />
       )}
 
-      <button
-        onClick={onToggleMobile}
-        style={{
-          position: 'fixed', top: 16, left: 16, zIndex: 200,
-          background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRadius: 8, padding: 8, cursor: 'pointer', color: 'var(--text)',
-          display: 'none',
-        }}
-        className="mobile-menu-btn"
-      >
-        {mobileOpen ? <X size={18} /> : <Menu size={18} />}
-      </button>
+
 
       <aside className={`sidebar ${mobileOpen ? 'open' : ''}`}>
         <div className="sidebar-logo">
@@ -92,11 +81,7 @@ export default function Sidebar({ active, onNavigate, mobileOpen, onToggleMobile
         </div>
       </aside>
 
-      <style>{`
-        @media (max-width: 768px) {
-          .mobile-menu-btn { display: flex !important; }
-        }
-      `}</style>
+
     </>
   );
 }
