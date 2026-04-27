@@ -1,6 +1,7 @@
 // TeaYOY.js — Year-over-Year comparison for Tea Plantation
 // Imported and rendered as a tab inside TeaPage
 import React, { useEffect, useState, useMemo } from 'react';
+import { useMobile } from '../../hooks/useMobile';
 import { db } from '../../firebase';
 import { getDocs, query, collection, where } from 'firebase/firestore';
 import { inr } from '../../utils/chaayaService';
@@ -47,6 +48,7 @@ async function loadTeaYear(year) {
 }
 
 export default function TeaYOY() {
+  const isMobile = useMobile();
   const [data, setData]     = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -83,7 +85,7 @@ export default function TeaYOY() {
   return (
     <div>
       {/* Annual KPI cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16, marginBottom: 24 }}>
+      <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr 1fr',gap:isMobile?12:16,marginBottom: 24}}>
         {data.map((d, idx) => {
           const prev = idx > 0 ? data[idx - 1] : null;
           const di   = prev ? delta(d.income, prev.income) : null;
@@ -91,7 +93,7 @@ export default function TeaYOY() {
           return (
             <div key={d.year} className="card" style={{ borderTop: `3px solid ${COLORS[idx]}` }}>
               <div className="stat-label" style={{ color: COLORS[idx] }}>{d.year}</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 10 }}>
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr 1fr',gap:isMobile?12:16,marginTop: 10}}>
                 {[
                   { l: 'Revenue',  v: inr(d.income),  cls: 'income-text' },
                   { l: 'Expenses', v: inr(d.expense), cls: 'expense-text' },

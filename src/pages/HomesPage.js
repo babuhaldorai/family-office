@@ -1,3 +1,4 @@
+import { useMobile } from '../hooks/useMobile';
 import React, { useEffect, useState, useMemo } from 'react';
 import { homePropertyService, homeExpenseService, HOME_CATEGORIES } from '../utils/homeService';
 import { useAuth } from '../context/AuthContext';
@@ -109,6 +110,7 @@ function PeriodBar({ period, onChange }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function HomesPage() {
+  const isMobile = useMobile();
   const { isAdmin } = useAuth();
   const [properties, setProperties] = useState([]);
   const [expenses, setExpenses]     = useState([]);
@@ -208,7 +210,7 @@ export default function HomesPage() {
         </div>
       </div>
 
-      <div className="page-content-inner">
+      <div style={{padding:isMobile?'0 12px 80px':'0 32px 32px'}}>
 
         {/* Tabs at top */}
         <div className="tabs">
@@ -249,7 +251,7 @@ export default function HomesPage() {
             {/* Property cards */}
             {propStats.length === 0
               ? <div className="empty-state"><p>No homes yet. Add one in the Homes tab.</p></div>
-              : <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))', gap:16, marginBottom:24 }}>
+              : <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(auto-fill,minmax(280px,1fr))',gap:isMobile?12:16,marginBottom:24}}>
                   {propStats.map(p => {
                     const maxT = Math.max(...propStats.map(x=>x.periodTotal), 1);
                     return (
@@ -308,7 +310,7 @@ export default function HomesPage() {
             {isAdmin && <div style={{ marginBottom:16 }}><button className="btn btn-primary" onClick={()=>setPropModal({open:true,initial:null})}><Plus size={14}/> Add Home</button></div>}
             {properties.length===0
               ? <div className="empty-state"><p>No homes added yet.</p></div>
-              : <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))', gap:16 }}>
+              : <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(auto-fill,minmax(280px,1fr))',gap:isMobile?12:16}}>
                   {properties.map(p => {
                     const aT = expenses.filter(e=>e.propertyId===p.id).reduce((s,e)=>s+Number(e.amount||0),0);
                     return (

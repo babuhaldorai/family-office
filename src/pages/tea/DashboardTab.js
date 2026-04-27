@@ -1,9 +1,11 @@
 import React, { useMemo } from 'react';
+import { useMobile } from '../../hooks/useMobile';
 import { inr, kgFmt, periodLabel, getFieldAcres } from '../../utils/chaayaService';
 import { AGENT_COLORS } from './chaayaStyles';
 import PeriodBar from './PeriodBar';
 
 export default function DashboardTab({ dashH, dashPeriod, setDashPeriod, fields, agentList, maintenance, pendingRateSessions }) {
+  const isMobile = useMobile();
   const tRev    = dashH.reduce((s, e) => s + (e.agentRev  || 0), 0);
   const tKg     = dashH.reduce((s, e) => s + (e.tNet      || 0), 0);
   const tWater  = dashH.reduce((s, e) => s + (e.tWaterDed || 0), 0);
@@ -83,7 +85,7 @@ export default function DashboardTab({ dashH, dashPeriod, setDashPeriod, fields,
       </div>
 
       {/* Field cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 12, marginBottom: 20 }}>
+      <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(auto-fill,minmax(280px,1fr))',gap:isMobile?12:16,marginBottom: 20}}>
         {fieldNames.map(name => {
           const fh    = dashH.filter(e => e.field === name);
           const fKg   = fh.reduce((s, e) => s + (e.tNet || 0), 0);
@@ -161,7 +163,7 @@ export default function DashboardTab({ dashH, dashPeriod, setDashPeriod, fields,
         <div className="ch-card">
           <div className="ch-card-title">Deduction Leakage by Agent</div>
           <div className="ch-card-sub">Revenue lost to water & bag deductions</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+          <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:isMobile?12:16,marginBottom: 14}}>
             <div style={{ background: 'rgba(224,92,92,.07)', borderRadius: 8, padding: 11 }}>
               <div style={{ fontSize: 10.5, color: 'var(--danger)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '.5px' }}>Water Ded.</div>
               <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--danger)', marginTop: 3 }}>{tWater.toFixed(1)} kg</div>

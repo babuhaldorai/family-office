@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useMobile } from '../hooks/useMobile';
 import { propertyService, tenantService, rentalService } from '../utils/firestoreService';
 import { useAuth } from '../context/AuthContext';
 import { Plus, Pencil, Trash2, X } from 'lucide-react';
@@ -10,6 +11,7 @@ const YEARS = [YEAR - 2, YEAR - 1, YEAR];
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 function Modal({ open, onClose, title, children, footer }) {
+  const isMobile = useMobile();
   if (!open) return null;
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -180,6 +182,7 @@ function PeriodBar({ period, onChange }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function RentalsPage() {
+  const isMobile = useMobile();
   const { isAdmin } = useAuth();
   const [tab, setTab]           = useState('overview');
   const [properties, setProperties] = useState([]);
@@ -295,7 +298,7 @@ export default function RentalsPage() {
         </div>
       </div>
 
-      <div className="page-content-inner">
+      <div style={{padding:isMobile?'0 12px 80px':'0 32px 32px'}}>
 
         {/* ── TABS (top, like Tea Plantation) ── */}
         <div className="tabs">
@@ -335,7 +338,7 @@ export default function RentalsPage() {
             {/* Property cards */}
             {propStats.length===0
               ? <div className="empty-state"><p>No properties yet. Add one in the Properties tab.</p></div>
-              : <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))', gap:16, marginBottom:24 }}>
+              : <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(auto-fill,minmax(280px,1fr))',gap:isMobile?12:16,marginBottom:24}}>
                   {propStats.map(p => (
                     <div key={p.id} className="card segment-rental">
                       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10 }}>
@@ -433,7 +436,7 @@ export default function RentalsPage() {
             {isAdmin && <div style={{ marginBottom:16 }}><button className="btn btn-primary" onClick={()=>setPropModal({open:true,initial:null})}><Plus size={14}/> Add Property</button></div>}
             {properties.length===0
               ? <div className="empty-state"><p>No properties yet.</p></div>
-              : <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))', gap:16 }}>
+              : <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(auto-fill,minmax(280px,1fr))',gap:isMobile?12:16}}>
                   {properties.map(p=>{
                     const tenant=activeTenantFor(p.id);
                     return(

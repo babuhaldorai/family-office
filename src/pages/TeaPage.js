@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { useMobile } from '../hooks/useMobile';
 import {
   harvestChaayaService, ratesChaayaService, settlementService,
   agentPaymentService, advanceService, maintenanceService, weatherService,
@@ -19,6 +20,7 @@ import TeaYOY from './tea/TeaYOY';
 
 export default function TeaPage() {
   const { isAdmin } = useAuth();
+  const isMobile = useMobile();
   const [tab, setTab] = useState('dashboard');
 
   const [harvest, setHarvest]         = useState([]);
@@ -178,7 +180,7 @@ export default function TeaPage() {
         )}
       </div>
 
-      <div className="page-content-inner">
+      <div style={{padding:isMobile?'0 12px 80px':'0 32px 32px'}}>
         <div className="ch-tabs">
           {[...TABS, { key: 'yoy', label: '📈 YOY' }].map(t => (
             <button key={t.key} className={`ch-tab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>

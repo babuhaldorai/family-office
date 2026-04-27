@@ -1,4 +1,5 @@
 import React,{useState} from 'react';
+import { useMobile } from '../../hooks/useMobile';
 import {inr,agentPendingBreakdown} from '../../utils/chaayaService';
 import {C} from './chaayaStyles';
 
@@ -6,6 +7,7 @@ export default function SettlementsTab({
   isAdmin,harvest,settlements,advances,agentPayments,workerList,
   onWorkerPay,onAgentPay,onDeleteSettlement,onDeleteAgentPayment,
 }){
+  const isMobile = useMobile();
   const [stab,setStab]=useState('workers');
   const [settleView,setSettleView]=useState('week');
   const agentBreakdown=agentPendingBreakdown(harvest,agentPayments);
@@ -40,7 +42,7 @@ export default function SettlementsTab({
                     <span style={{fontWeight:600,color:'var(--text)'}}>{x.agent}</span>
                     <span style={{fontWeight:500,color:x.pending>0?C.rust:C.leaf}}>{x.pending>0?`${inr(x.pending)} owed`:'Fully paid'}</span>
                   </div>
-                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:10}}>
+                  <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr 1fr',gap:isMobile?12:16,marginBottom:10}}>
                     {[['Total Net',`${x.totalKg.toFixed(1)} kg`],['Sessions',x.sessions],['Avg Rate',`₹${x.avgRate.toFixed(2)}`]].map(([l,v])=>(
                       <div key={l} style={{textAlign:'center',padding:6,background:'var(--surface2)',borderRadius:4}}>
                         <div style={{fontWeight:500,color:'var(--text)',fontSize:12}}>{v}</div>
@@ -131,6 +133,7 @@ export default function SettlementsTab({
 }
 
 function AgentWeekView({agentBreakdown,agentPayments,isAdmin,onDelete}){
+  const isMobile = useMobile();
   return(
     <div>
       {agentBreakdown.map(x=>(

@@ -4,6 +4,7 @@
  * Replaces the separate Dashboard, ReportsPage, and YOYPage routes.
  */
 import React, { useEffect, useState, useMemo } from 'react';
+import { useMobile } from '../hooks/useMobile';
 import { db } from '../firebase';
 import { getDocs, query, collection, where } from 'firebase/firestore';
 import { rentalService } from '../utils/firestoreService';
@@ -80,6 +81,7 @@ function PeriodBar({periodKey,onChange}) {
 
 
 export default function Overview() {
+  const isMobile = useMobile();
   const [mainTab, setMainTab]     = useState('dashboard');
   const [periodKey, setPeriodKey] = useState('ytd');
 
@@ -350,14 +352,14 @@ export default function Overview() {
                   </div>
 
                   {/* Segment detail cards */}
-                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:16,marginBottom:24}}>
+                  <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr 1fr',gap:isMobile?12:16,marginBottom:24}}>
 
                     {/* Tea Plantation */}
                     <div className="card segment-tea">
                       <div style={{fontWeight:700,marginBottom:4}}>🍃 Tea Plantation</div>
                       {teaDash&&<div style={{fontSize:'0.72rem',color:'var(--muted)',marginBottom:10}}>Week: <strong style={{color:'var(--tea-light)'}}>{teaDash.cwKg.toFixed(1)} kg</strong></div>}
                       {/* Revenue / Expenses / Net row */}
-                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6,marginBottom:12}}>
+                      <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr 1fr',gap:isMobile?12:16,marginBottom:12}}>
                         {[{l:'Revenue',v:teaInc,c:'income-text'},{l:'Expenses',v:teaExp,c:'expense-text'},{l:'Net',v:teaInc-teaExp,c:teaInc-teaExp>=0?'income-text':'expense-text'}].map(s=>(
                           <div key={s.l}><div className="stat-label">{s.l}</div><div className={`amount-cell ${s.c}`} style={{fontSize:'0.85rem'}}>{fmt(s.v)}</div></div>
                         ))}
@@ -397,7 +399,7 @@ export default function Overview() {
                     {/* Rental Homes */}
                     <div className="card segment-rental">
                       <div style={{fontWeight:700,marginBottom:12}}>🏠 Rental Homes</div>
-                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6,marginBottom:12}}>
+                      <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr 1fr',gap:isMobile?12:16,marginBottom:12}}>
                         {[{l:'Revenue',v:rentInc,c:'income-text'},{l:'Expenses',v:rentExp,c:'expense-text'},{l:'Net',v:rentInc-rentExp,c:rentInc-rentExp>=0?'income-text':'expense-text'}].map(s=>(
                           <div key={s.l}><div className="stat-label">{s.l}</div><div className={`amount-cell ${s.c}`} style={{fontSize:'0.85rem'}}>{fmt(s.v)}</div></div>
                         ))}
@@ -657,7 +659,7 @@ export default function Overview() {
                 </div>
               )}
               {rTab==='segment'&&(
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:16}}>
+                <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr 1fr',gap:isMobile?12:16}}>
                   <div className="card segment-tea" style={{padding:0}}>
                     <div style={{padding:'14px 16px 0',fontWeight:700}}>🍃 Tea Plantation</div>
                     <table>
@@ -709,7 +711,7 @@ export default function Overview() {
             {yoyLoading&&<div style={{padding:40,color:'var(--muted)'}}>Loading YOY data…</div>}
             {!yoyLoading&&<>
               {/* Annual KPI cards */}
-              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:16,marginBottom:24}}>
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr 1fr',gap:isMobile?12:16,marginBottom:24}}>
                 {yoyRows.map((row,idx)=>{
                   const prev=idx>0?yoyRows[idx-1]:null;
                   const di=prev?delta(row.income,prev.income):null;
