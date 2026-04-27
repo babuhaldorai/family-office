@@ -133,7 +133,6 @@ export default function SettlementsTab({
 }
 
 function AgentWeekView({agentBreakdown,agentPayments,isAdmin,onDelete}){
-  const isMobile = useMobile();
   return(
     <div>
       {agentBreakdown.map(x=>(

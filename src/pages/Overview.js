@@ -9,7 +9,7 @@ import { db } from '../firebase';
 import { getDocs, query, collection, where } from 'firebase/firestore';
 import { rentalService } from '../utils/firestoreService';
 import { homeExpenseService } from '../utils/homeService';
-import { buildMonthlyPL, buildCategoryBreakdown, fmt, MONTHS } from '../utils/finance';
+import { buildMonthlyPL, fmt, MONTHS } from '../utils/finance';
 import { useTeaFinancials, useTeaDashboard } from '../hooks/useTeaFinancials';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,

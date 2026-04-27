@@ -11,7 +11,7 @@ const YEARS = [YEAR - 2, YEAR - 1, YEAR];
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 function Modal({ open, onClose, title, children, footer }) {
-  const isMobile = useMobile();
+  const isMobile = useMobile(); // eslint-disable-line no-unused-vars
   if (!open) return null;
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -182,7 +182,7 @@ function PeriodBar({ period, onChange }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function RentalsPage() {
-  const isMobile = useMobile();
+  const isMobile = useMobile(); // eslint-disable-line no-unused-vars
   const { isAdmin } = useAuth();
   const [tab, setTab]           = useState('overview');
   const [properties, setProperties] = useState([]);
@@ -257,6 +257,7 @@ export default function RentalsPage() {
     const expected = Number(p.monthlyRent||0) * periodMonths;
     const collectedPct = expected > 0 ? Math.min((pIncome/expected)*100,100) : 0;
     return { ...p, pIncome, pExpense, tenant, daysLeft, expected, collectedPct };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [properties, periodTx, periodMonths, tenants]);
 
   const occupied     = properties.filter(p => activeTenantFor(p.id)).length;

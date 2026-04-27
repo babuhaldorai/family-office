@@ -1,6 +1,5 @@
 // RentalYOY.js — Year-over-Year comparison for Rental Homes
 import React, { useEffect, useState, useMemo } from 'react';
-import { useMobile } from '../hooks/useMobile';
 import { db } from '../firebase';
 import { getDocs, query, collection, where } from 'firebase/firestore';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, LineChart, Line } from 'recharts';
@@ -10,9 +9,7 @@ const YEARS = [CUR - 2, CUR - 1, CUR];
 const COLORS = ['var(--muted)', 'var(--tea-light)', 'var(--accent)'];
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-function fmt(n) {
-  const isMobile = useMobile();
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n || 0);
+function fmt(n) {  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n || 0);
 }
 
 async function loadRentalYear(year) {
@@ -48,7 +45,6 @@ async function loadRentalYear(year) {
 }
 
 export default function RentalYOY() {
-  const isMobile = useMobile();
   const [data, setData]     = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -83,7 +79,7 @@ export default function RentalYOY() {
   return (
     <div>
       {/* Annual KPI cards */}
-      <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr 1fr',gap:isMobile?12:16,marginBottom: 24}}>
+      <div className="yoy-card-grid">
         {data.map((d, idx) => {
           const prev = idx > 0 ? data[idx - 1] : null;
           const di   = prev ? delta(d.income, prev.income) : null;
@@ -91,7 +87,7 @@ export default function RentalYOY() {
           return (
             <div key={d.year} className="card" style={{ borderTop: `3px solid ${COLORS[idx]}` }}>
               <div className="stat-label" style={{ color: COLORS[idx] }}>{d.year}</div>
-              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr 1fr',gap:isMobile?12:16,marginTop: 10}}>
+              <div className="yoy-inner-grid">
                 {[
                   { l: 'Revenue',  v: fmt(d.income),  cls: 'income-text' },
                   { l: 'Expenses', v: fmt(d.expense), cls: 'expense-text' },

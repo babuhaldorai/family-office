@@ -1,5 +1,6 @@
 import { useMobile } from '../hooks/useMobile';
 import React, { useEffect, useState, useMemo } from 'react';
+import HomeYOY from './HomeYOY';
 import { homePropertyService, homeExpenseService, HOME_CATEGORIES } from '../utils/homeService';
 import { useAuth } from '../context/AuthContext';
 import { Plus, Pencil, Trash2, X } from 'lucide-react';
@@ -197,6 +198,7 @@ export default function HomesPage() {
     { key:'homes',     label:'🏠 Homes'       },
     { key:'expenses',  label:'₹ Expenses'    },
     { key:'breakdown', label:'◎ By Category' },
+    { key:'yoy',       label:'📈 YOY'         },
   ];
 
   if (loading) return <div style={{ padding:40, color:'var(--muted)' }}>Loading…</div>;
@@ -468,6 +470,8 @@ export default function HomesPage() {
             </div>
           </div>
         )}
+
+        {tab==='yoy' && <HomeYOY />}
       </div>
 
       <PropertyModal open={propModal.open} initial={propModal.initial} onClose={()=>setPropModal({open:false,initial:null})} onSave={handleSaveProp} />
