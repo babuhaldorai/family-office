@@ -299,7 +299,7 @@ export default function RentalsPage() {
         </div>
       </div>
 
-      <div style={{padding:isMobile?'0 12px 80px':'0 32px 32px'}}>
+      <div className="page-content-inner">
 
         {/* ── TABS (top, like Tea Plantation) ── */}
         <div className="tabs">

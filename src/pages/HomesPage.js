@@ -212,7 +212,7 @@ export default function HomesPage() {
         </div>
       </div>
 
-      <div style={{padding:isMobile?'0 12px 80px':'0 32px 32px'}}>
+      <div className="page-content-inner">
 
         {/* Tabs at top */}
         <div className="tabs">

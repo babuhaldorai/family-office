@@ -180,7 +180,7 @@ export default function TeaPage() {
         )}
       </div>
 
-      <div style={{padding:isMobile?'0 12px 80px':'0 32px 32px'}}>
+      <div className="page-content-inner">
         <div className="ch-tabs">
           {[...TABS, { key: 'yoy', label: '📈 YOY' }].map(t => (
             <button key={t.key} className={`ch-tab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
