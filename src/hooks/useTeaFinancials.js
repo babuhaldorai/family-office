@@ -17,7 +17,7 @@ function parseYear(record, fallback) {
   return fallback;
 }
 
-export function useTeaFinancials(year) {
+export function useTeaFinancials(year, { includeMaintenance = true } = {}) {
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading]           = useState(true);
 
@@ -32,36 +32,48 @@ export function useTeaFinancials(year) {
         );
         const harvest = snap2arr(harvestSnap);
 
-        // Fetch maintenance — try with year filter first, fall back to all
-        // (old records may not have year field)
+        // Fetch maintenance only when requested (Overview fetches it separately to avoid duplication)
         let maintain = [];
-        try {
-          const ms = await getDocs(
-            query(col('tea_maintenance'), where('year', '==', year))
-          );
-          maintain = snap2arr(ms);
-          // If nothing came back, fetch all and filter by date
-          if (maintain.length === 0) {
+        if (includeMaintenance) {
+          try {
             const all = await getDocs(col('tea_maintenance'));
-            maintain = snap2arr(all).filter(m => {
-              const y = parseYear(m, year);
-              return y === year;
-            });
-          }
-        } catch {
-          const all = await getDocs(col('tea_maintenance'));
-          maintain = snap2arr(all).filter(m => parseYear(m, year) === year);
+            maintain = snap2arr(all);
+          } catch { maintain = []; }
         }
+
+        // Fetch leases for this specific year only
+        let leaseRecs = [];
+        try {
+          const ls = await getDocs(col('tea_field_leases'));
+          leaseRecs = snap2arr(ls).filter(l => {
+            const ly = l.year ? Number(l.year)
+                     : l.startDate ? new Date(l.startDate).getFullYear()
+                     : year;
+            return ly === year;
+          });
+        } catch { leaseRecs = []; }
 
         if (cancelled) return;
 
         const txs = [];
+
+        // Income: field lease payments
+        leaseRecs.forEach(l => {
+          const amt = l.amount || 0;
+          if (amt <= 0) return;
+          txs.push({
+            date: l.startDate, type: 'income', category: 'Field Lease',
+            amount: amt, month: parseMonth(l), year: parseYear(l, year),
+            segment: 'Tea',
+          });
+        });
 
         // Income: agent revenue
         harvest.forEach(h => {
           const rev = h.agentRev || 0;
           if (rev <= 0) return;
           txs.push({
+            id: `income-${h.id}`,  // unique per harvest session
             date: h.date, type: 'income', category: 'Tea Sales',
             amount: rev, month: parseMonth(h), year: parseYear(h, year),
             segment: 'Tea', rateStatus: h.rateStatus || 'confirmed',
@@ -73,20 +85,25 @@ export function useTeaFinancials(year) {
           const wages = h.workerPay || 0;
           if (wages <= 0) return;
           txs.push({
+            id: `labour-${h.id}`,  // unique per harvest session
             date: h.date, type: 'expense', category: 'Labour',
             amount: wages, month: parseMonth(h), year: parseYear(h, year),
             segment: 'Tea',
           });
         });
 
-        // Expense: maintenance tasks — always include, even without month
+        // Expense: maintenance tasks — include all records
         maintain.forEach(m => {
           const cost = m.cost || 0;
           if (cost <= 0) return;
+          const mo = parseMonth(m);
+          const yr = parseYear(m, year); // actual year of the record
+          const date = m.date || `${yr}-${String(mo).padStart(2,'0')}-15`;
           txs.push({
-            date: m.date, type: 'expense',
-            category: m.task || 'Maintenance',  // Pruning, Weeding, etc.
-            amount: cost, month: parseMonth(m), year: parseYear(m, year),
+            id: `maint-${m.id}`,  // unique per maintenance record
+            date, type: 'expense',
+            category: m.task || 'Maintenance',
+            amount: cost, month: mo, year: yr,
             segment: 'Tea',
           });
         });
@@ -101,6 +118,7 @@ export function useTeaFinancials(year) {
     }
     load();
     return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year]);
 
   return { transactions, loading };
@@ -112,12 +130,16 @@ export function useTeaDashboard() {
   useEffect(() => {
     async function load() {
       try {
-        const [harvestSnap, maintSnap] = await Promise.all([
+        const [harvestSnap, maintSnap, leaseSnap, settlementSnap] = await Promise.all([
           getDocs(col('tea_harvest')),
           getDocs(col('tea_maintenance')),
+          getDocs(col('tea_field_leases')),
+          getDocs(col('tea_settlements')),
         ]);
         const harvest     = snap2arr(harvestSnap);
         const maintenance = snap2arr(maintSnap);
+        const leaseRecs   = snap2arr(leaseSnap);
+        const settles     = snap2arr(settlementSnap);
 
         const now  = new Date(), day = now.getDay();
         const mon  = new Date(now); mon.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
@@ -129,8 +151,12 @@ export function useTeaDashboard() {
         const cwKg      = cwH.reduce((s, h) => s + (h.tNet      || 0), 0);
         const cwRevenue = cwH.reduce((s, h) => s + (h.agentRev  || 0), 0);
 
-        const totalRevenue = harvest.reduce((s, h)     => s + (h.agentRev  || 0), 0);
+        const harvestRevenue = harvest.reduce((s, h) => s + (h.agentRev || 0), 0);
+        const leaseRevenue   = leaseRecs.reduce((s, l) => s + (Number(l.amount)  || 0), 0);
+        const totalRevenue   = harvestRevenue + leaseRevenue;
         const totalWages   = harvest.reduce((s, h)     => s + (h.workerPay || 0), 0);
+        const totalSettled   = settles.reduce((s, st)    => s + (Number(st.netPaid)|| 0), 0);
+        const unpaidWages    = Math.max(0, totalWages - totalSettled);
         const totalMaint   = maintenance.reduce((s, m) => s + (m.cost      || 0), 0);
 
         // Per-task breakdown for dashboard
@@ -143,6 +169,8 @@ export function useTeaDashboard() {
         setData({
           cwKg, cwRevenue,
           totalIncome:   totalRevenue,
+          totalSettled,
+          unpaidWages,
           totalExpense:  totalWages + totalMaint,
           totalWages,
           totalMaint,

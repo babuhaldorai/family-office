@@ -266,3 +266,21 @@ export function agentPendingBreakdown(harvest, agentPayments) {
     return { agent: a, earned, received, pending: Math.max(0, earned - received), totalKg, sessions, avgRate };
   }).filter(x => x.earned > 0 || x.received > 0);
 }
+
+// Tea Field Leases
+export const leaseService = {
+  subscribe(cb) {
+    return onSnapshot(collection(db, 'tea_field_leases'), snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  },
+  async add(data) {
+    return addDoc(collection(db, 'tea_field_leases'), { ...data, createdAt: serverTimestamp() });
+  },
+  async update(id, data) {
+    return updateDoc(doc(db, 'tea_field_leases', id), data);
+  },
+  async delete(id) {
+    return deleteDoc(doc(db, 'tea_field_leases', id));
+  },
+};

@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { useMobile } from '../hooks/useMobile';
 import {
   harvestChaayaService, ratesChaayaService, settlementService,
   agentPaymentService, advanceService, maintenanceService, weatherService,
@@ -8,6 +7,8 @@ import {
   periodBounds, getFilteredHarvest, weekLabel, todayStr, workerUnpaidWages,
 } from '../utils/chaayaService';
 import { useAuth } from '../context/AuthContext';
+import { getDocs, collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../firebase';
 import { TABS, currentWeekLabel } from './tea/chaayaStyles';
 import DashboardTab from './tea/DashboardTab';
 import HarvestTab from './tea/HarvestTab';
@@ -16,11 +17,105 @@ import { AdvancesTab, MaintenanceTab, WeatherTab, RatesTab } from './tea/Operati
 import { AnalyticsTab, AgentAnalyticsTab } from './tea/AnalyticsTabs';
 import PeopleTab, { EntityModal } from './tea/PeopleTab';
 import { WorkerSettleModal, AgentPayModal } from './tea/SettleModals';
+import LeaseTab from './tea/LeaseTab';
 import TeaYOY from './tea/TeaYOY';
 
+
 export default function TeaPage() {
-  const { isAdmin } = useAuth();
-  const isMobile = useMobile();
+  const { isAdmin, user: authUser } = useAuth();
+  const userEmail = authUser?.email || 'unknown';
+  const writeAudit = async (action, col, summary) => {
+    try {
+      await addDoc(collection(db, 'audit_log'), {
+        action, collection: col,
+        summary: summary || '',
+        userEmail: userEmail || 'unknown',
+        timestamp: serverTimestamp(),
+      });
+    } catch(e) {
+      console.error('[Audit fail]', e.code, e.message);
+    }
+  };
+
+  // ── Referential integrity checks before deletes ──────────────────────────
+  const checkBeforeDelete = async (type, id, record) => {
+    switch(type) {
+
+      case 'market_rate': {
+        // Cannot delete if any harvest uses this agent+date range
+        const rate = record;
+        const used = harvest.filter(h =>
+          h.agent === rate.agent &&
+          h.date  >= rate.fromDate &&
+          (!rate.toDate || h.date <= rate.toDate)
+        );
+        if (used.length > 0) {
+          alert(`❌ Cannot delete this rate — it is used by ${used.length} harvest session(s) for agent "${rate.agent}".
+
+Delete those harvest sessions first, or update the rate dates.`);
+          return false;
+        }
+        return true;
+      }
+
+      case 'field': {
+        // Cannot delete if field has harvest or maintenance
+        const usedH = harvest.filter(h => h.field === record.name);
+        const usedM = maintenance.filter(m => m.field === record.name);
+        const usedL = leases.filter(l => l.field === record.name);
+        if (usedH.length + usedM.length + usedL.length > 0) {
+          alert(`❌ Cannot delete field "${record.name}" — it has ${usedH.length} harvest session(s), ${usedM.length} maintenance record(s), and ${usedL.length} lease(s).
+
+Delete those records first.`);
+          return false;
+        }
+        return true;
+      }
+
+      case 'worker': {
+        // Cannot delete if worker has harvest sessions or settlements
+        const usedH = harvest.filter(h => h.worker === record.name);
+        const usedS = settlements.filter(s => s.worker === record.name);
+        const usedA = advances.filter(a => a.worker === record.name);
+        if (usedH.length + usedS.length + usedA.length > 0) {
+          alert(`❌ Cannot delete worker "${record.name}" — they have ${usedH.length} harvest session(s), ${usedS.length} settlement(s), and ${usedA.length} advance(s).
+
+Delete those records first.`);
+          return false;
+        }
+        return true;
+      }
+
+      case 'agent': {
+        // Cannot delete if agent has harvest sessions or payments
+        const usedH = harvest.filter(h => h.agent === record.name);
+        const usedP = agentPayments.filter(p => p.agent === record.name);
+        if (usedH.length + usedP.length > 0) {
+          alert(`❌ Cannot delete agent "${record.name}" — they have ${usedH.length} harvest session(s) and ${usedP.length} payment(s).
+
+Delete those records first.`);
+          return false;
+        }
+        return true;
+      }
+
+      case 'lease': {
+        // Cannot delete active lease if within lease period
+        const today2 = new Date().toISOString().slice(0,10);
+        if (record.startDate <= today2 && record.endDate >= today2) {
+          const confirmed = window.confirm(`⚠️ This lease is currently ACTIVE (${record.startDate} to ${record.endDate}).
+
+Deleting it will allow transactions on this field again. Are you sure?`);
+          return confirmed;
+        }
+        return true;
+      }
+
+      default:
+        return true;
+    }
+  };
+
   const [tab, setTab] = useState('dashboard');
 
   const [harvest, setHarvest]         = useState([]);
@@ -30,6 +125,24 @@ export default function TeaPage() {
   const [advances, setAdvances]       = useState([]);
   const [maintenance, setMaintenance] = useState([]);
   const [weather, setWeather]         = useState([]);
+  const [leases,  setLeases]          = useState([]);
+
+  // Load leases directly from Firestore
+  useEffect(() => {
+    getDocs(collection(db, 'tea_field_leases'))
+      .then(snap => setLeases(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+      .catch(() => setLeases([]));
+  }, []);
+
+  // Fields on lease for a GIVEN date (not just today)
+  // Used to block harvest/maintenance only when the entry date is within the lease term
+  const today = new Date().toISOString().slice(0, 10);
+  const getActiveLeaseForFieldDate = (field, date) =>
+    leases.find(l => l.field === field && l.startDate <= date && l.endDate >= date);
+  // For the warning indicator (uses today)
+  const leasedFields = new Set(
+    leases.filter(l => l.startDate <= today && l.endDate >= today).map(l => l.field)
+  );
   const [workers, setWorkers]         = useState([]);
   const [agents, setAgents]           = useState([]);
   const [fields, setFields]           = useState([]);
@@ -62,6 +175,7 @@ export default function TeaPage() {
       advanceService.subscribe(setAdvances),
       maintenanceService.subscribe(setMaintenance),
       weatherService.subscribe(setWeather),
+      // leases loaded via useEffect below
       workersChaayaService.subscribe(setWorkers),
       agentsChaayaService.subscribe(setAgents),
       fieldsChaayaService.subscribe(setFields),
@@ -112,12 +226,20 @@ export default function TeaPage() {
       month: new Date(hDate).getMonth() + 1,
     };
     setSavingHarvest(true);
+    let saved = false;
+    const auditAction = editingHarvestId ? 'update' : 'create';
     try {
-      if (editingHarvestId) await harvestChaayaService.update(editingHarvestId, data);
-      else                  await harvestChaayaService.add(data);
+      if (editingHarvestId) {
+        await harvestChaayaService.update(editingHarvestId, data);
+      } else {
+        await harvestChaayaService.add(data);
+      }
+      saved = true;
       setBags([]); setEditingHarvestId(null);
     } catch (e) { alert('Save failed: ' + e.message); }
     finally { setSavingHarvest(false); }
+    // Fire audit log after save completes - outside try/catch so it never blocks
+    if (saved) writeAudit(auditAction,'tea_harvest',`${auditAction==='update'?'Updated':'Added'} harvest: ${data.field} on ${data.date}, net ${Number(data.tNet||0).toFixed(2)}kg`);
   };
 
   const editHarvestEntry = useCallback((entry) => {
@@ -135,14 +257,18 @@ export default function TeaPage() {
   const saveEntity = async (form) => {
     const { type, editing } = entityModal;
     const svc = type === 'worker' ? workersChaayaService : type === 'agent' ? agentsChaayaService : fieldsChaayaService;
-    if (editing) await svc.update(editing.id, form);
-    else         await svc.add(form);
+    if (editing) { await svc.update(editing.id, form); writeAudit('update', type==='worker'?'workers':type==='agent'?'agents':'fields', `Updated ${type}: ${form.name||editing.id}`); }
+    else         { await svc.add(form); writeAudit('create', type==='worker'?'workers':type==='agent'?'agents':'fields', `Added ${type}: ${form.name||''}`); }
     setEntityModal({ open: false, type: null, editing: null });
   };
   const deleteEntity = async (type, id) => {
     if (!window.confirm('Delete this record?')) return;
+    const entityList = type==='worker'?workers:type==='agent'?agents:fields;
+    const record = entityList.find(e=>e.id===id);
     const svc = type === 'worker' ? workersChaayaService : type === 'agent' ? agentsChaayaService : fieldsChaayaService;
-    await svc.delete(id);
+    const ok = await checkBeforeDelete(type, id, record||{name:id});
+    if (!ok) return;
+    await svc.delete(id); writeAudit('delete', type==='worker'?'workers':type==='agent'?'agents':'fields', `Deleted ${type}: ${record?.name||id}`);
   };
 
   const saveWorkerSettlement = async (worker, amount, notes, isFloat) => {
@@ -153,19 +279,36 @@ export default function TeaPage() {
       return;
     }
     await settlementService.add({ worker, netPaid: amount, date: todayStr(), notes, paidBeforeAgent: isFloat });
+    writeAudit('create','tea_settlements',`Settlement: ${worker} paid ${amount} on ${todayStr()}`);
     setWorkerSettleModal({ open: false, worker: null, amount: 0, isFloat: false });
   };
 
   const saveAgentPayment = async (agent, amount, date, method, notes) => {
     if (!amount) return alert('Enter amount');
     await agentPaymentService.add({ agent, amount, date, method, notes });
+    writeAudit('create','tea_agent_payments',`Agent payment: ${agent} ${amount} on ${date}`);
     setAgentPayModal(false);
   };
 
   const dashH         = useMemo(() => getFilteredHarvest(harvest, dashPeriod),  [harvest, dashPeriod]);
   const anaH          = useMemo(() => getFilteredHarvest(harvest, anaPeriod),   [harvest, anaPeriod]);
   const agtH          = useMemo(() => getFilteredHarvest(harvest, agtPeriod),   [harvest, agtPeriod]);
-  const harvestWeeks  = useMemo(() => [...new Set(harvest.map(e => e.weekStr || weekLabel(e.date)).filter(Boolean))].sort().reverse(), [harvest]);
+  const harvestWeeks = useMemo(() => {
+    const seen = new Set();
+    const result = [];
+    [...harvest].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(h => {
+      const wk = h.weekStr || weekLabel(h.date);
+      if (!wk || seen.has(wk)) return;
+      seen.add(wk);
+      // Calculate Mon-Sun dates for this week
+      const d = new Date(h.date), day = d.getDay();
+      const mon = new Date(d); mon.setDate(d.getDate() - (day===0?6:day-1));
+      const sun = new Date(mon); sun.setDate(mon.getDate()+6);
+      const f = dt => dt.toISOString().slice(0,10);
+      result.push({ value: wk, label: `${wk}  (${f(mon)} → ${f(sun)})` });
+    });
+    return result;
+  }, [harvest]);
   const filteredHarvest = useMemo(() => harvestFilter === 'all' ? harvest : harvest.filter(e => (e.weekStr || weekLabel(e.date)) === harvestFilter), [harvest, harvestFilter]);
 
   return (
@@ -182,7 +325,7 @@ export default function TeaPage() {
 
       <div className="page-content-inner">
         <div className="ch-tabs">
-          {[...TABS, { key: 'yoy', label: '📈 YOY' }].map(t => (
+          {[...TABS, { key: 'lease', label: '🔑 Field Leases' }, { key: 'yoy', label: '📈 YOY' }].map(t => (
             <button key={t.key} className={`ch-tab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
               {t.label}
               {/* Show dot on harvest tab if pending rate sessions exist */}
@@ -196,13 +339,16 @@ export default function TeaPage() {
         {tab === 'dashboard' && (
           <DashboardTab
             dashH={dashH} dashPeriod={dashPeriod} setDashPeriod={setDashPeriod}
+            allHarvest={harvest}
             fields={fields} agentList={agentList}
-            maintenance={maintenance}
+            maintenance={maintenance} leases={leases}
+            settlements={settlements} advances={advances}
             pendingRateSessions={pendingRateSessions}
           />
         )}
         {tab === 'harvest' && (
           <HarvestTab
+            leasedFields={leasedFields}
             isAdmin={isAdmin} bags={bags} setBags={setBags}
             deductMode={deductMode} setDeductMode={setDeductMode}
             hDate={hDate} setHDate={setHDate}
@@ -216,7 +362,7 @@ export default function TeaPage() {
             filteredHarvest={filteredHarvest} harvestFilter={harvestFilter}
             setHarvestFilter={setHarvestFilter} harvestWeeks={harvestWeeks}
             editHarvestEntry={editHarvestEntry}
-            deleteHarvestEntry={id => { if (window.confirm('Delete?')) harvestChaayaService.delete(id); }}
+            deleteHarvestEntry={async id => { if (window.confirm('Delete?')) { await harvestChaayaService.delete(id); writeAudit('delete','tea_harvest',`Deleted harvest ${id}`); } }}
             pendingRateSessions={pendingRateSessions}
           />
         )}
@@ -226,31 +372,45 @@ export default function TeaPage() {
             advances={advances} agentPayments={agentPayments} workerList={workerList}
             onWorkerPay={(w, amt, isFloat) => setWorkerSettleModal({ open: true, worker: w, amount: amt, isFloat })}
             onAgentPay={() => setAgentPayModal(true)}
-            onDeleteSettlement={id => { if (window.confirm('Delete?')) settlementService.delete(id); }}
-            onDeleteAgentPayment={id => { if (window.confirm('Delete?')) agentPaymentService.delete(id); }}
+            onDeleteSettlement={async id => { if (window.confirm('Delete?')) { await settlementService.delete(id); writeAudit('delete','tea_settlements',`Deleted settlement ${id}`); } }}
+            onDeleteAgentPayment={async id => { if (window.confirm('Delete?')) { await agentPaymentService.delete(id); writeAudit('delete','tea_agent_payments',`Deleted agent payment ${id}`); } }}
           />
         )}
         {tab === 'advances' && (
           <AdvancesTab
             isAdmin={isAdmin} advances={advances} workerList={workerList}
-            onSave={data => advanceService.add(data)}
-            onMarkDeducted={id => advanceService.update(id, { deducted: true })}
-            onDelete={id => { if (window.confirm('Delete?')) advanceService.delete(id); }}
+            onSave={async data => { await advanceService.add(data); writeAudit('create','tea_advances',`Added advance: ${data.worker||data.agent||''} ${data.amount}`); }}
+            onMarkDeducted={async id => { await advanceService.update(id,{deducted:true}); writeAudit('update','tea_advances',`Marked advance ${id} as deducted`); }}
+            onDelete={async id => { if (window.confirm('Delete?')) { await advanceService.delete(id); writeAudit('delete','tea_advances',`Deleted advance ${id}`); } }}
           />
         )}
         {tab === 'maintenance' && (
           <MaintenanceTab
             isAdmin={isAdmin} maintenance={maintenance}
             workerList={workerList} fieldList={fieldList}
-            onSave={data => maintenanceService.add(data)}
-            onDelete={id => { if (window.confirm('Delete?')) maintenanceService.delete(id); }}
+            onSave={async data => {
+              const mDate = data.date || today;
+              const activeLease = getActiveLeaseForFieldDate(data.field, mDate);
+              if(activeLease){alert(`❌ Cannot log maintenance on ${mDate} — ${data.field} is on lease from ${activeLease.startDate} to ${activeLease.endDate}.`);return;}
+              await maintenanceService.add(data);
+              writeAudit('create','tea_maintenance',`Added ${data.task} on ${data.field} - ${data.date}`);
+            }}
+            onDelete={id => { if (window.confirm('Delete?')) maintenanceService.delete(id).then(()=>writeAudit('delete','tea_maintenance',`Deleted maintenance record ${id}`)); }}
           />
         )}
         {tab === 'rates' && (
           <RatesTab
             isAdmin={isAdmin} rates={rates} agentList={agentList}
-            onSave={data => ratesChaayaService.add(data)}
-            onDelete={id => { if (window.confirm('Delete?')) ratesChaayaService.delete(id); }}
+            onSave={async data => { await ratesChaayaService.add(data); writeAudit('create','tea_market_rates',`Added rate: ${data.agent} ₹${data.rate}/kg from ${data.fromDate}`); }}
+            onDelete={async id => {
+              const rate = rates.find(r => r.id === id);
+              if (!rate) return;
+              const ok = await checkBeforeDelete('market_rate', id, rate);
+              if (!ok) return;
+              if (!window.confirm(`Delete this rate for ${rate.agent}?`)) return;
+              await ratesChaayaService.delete(id);
+              writeAudit('delete','tea_market_rates',`Deleted rate: ${rate.agent} from ${rate.fromDate}`);
+            }}
           />
         )}
         {tab === 'analytics' && (
@@ -258,6 +418,7 @@ export default function TeaPage() {
             anaH={anaH} anaPeriod={anaPeriod} setAnaPeriod={setAnaPeriod}
             fieldList={fieldList} fields={fields}
             maintenance={maintenance}
+            leases={leases}
           />
         )}
         {tab === 'agent_analytics' && (
@@ -275,12 +436,58 @@ export default function TeaPage() {
             onDelete={deleteEntity}
           />
         )}
+        {tab === 'lease' && (
+          <LeaseTab
+            isAdmin={isAdmin}
+            leases={leases}
+            fieldList={fieldList}
+            onSave={async (data, editId) => {
+              // Fix 6: Block if field has harvest/maintenance in the lease period
+              if (!editId) {
+                
+                const hSnap = await getDocs(collection(db, 'tea_harvest'));
+                const conflict = hSnap.docs.map(d => d.data()).find(h =>
+                  h.field === data.field && h.date >= data.startDate && h.date <= data.endDate
+                );
+                if (conflict) {
+                  alert(`❌ Cannot create lease — ${data.field} has a harvest entry on ${conflict.date} which falls within the proposed lease period (${data.startDate} to ${data.endDate}). Remove that transaction first.`);
+                  return;
+                }
+              }
+              const payload = {
+                ...data,
+                amount: Number(data.amount) || 0,
+                year: data.startDate ? new Date(data.startDate).getFullYear() : new Date().getFullYear(),
+                month: data.startDate ? new Date(data.startDate).getMonth() + 1 : new Date().getMonth() + 1,
+              };
+              if (editId) {
+                await updateDoc(doc(db, 'tea_field_leases', editId), payload);
+                writeAudit('update','tea_field_leases',`Updated lease: ${payload.field} lessee ${payload.lessee}`);
+              }
+              else {
+                await addDoc(collection(db, 'tea_field_leases'), { ...payload, createdAt: serverTimestamp() });
+                writeAudit('create','tea_field_leases',`Added lease: ${payload.field} to ${payload.lessee} from ${payload.startDate}`);
+              }
+              // Reload
+              getDocs(collection(db, 'tea_field_leases'))
+                .then(snap => setLeases(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+            }}
+            onDelete={async id => {
+              const lease = leases.find(l=>l.id===id);
+              const ok = await checkBeforeDelete('lease', id, lease||{});
+              if (!ok) return;
+              await deleteDoc(doc(db, 'tea_field_leases', id));
+              getDocs(collection(db, 'tea_field_leases'))
+                .then(snap => setLeases(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+            }}
+          />
+        )}
         {tab === 'yoy' && <TeaYOY />}
         {tab === 'weather' && (
           <WeatherTab
             isAdmin={isAdmin} weather={weather}
-            onSave={data => weatherService.add(data)}
-            onDelete={id => { if (window.confirm('Delete?')) weatherService.delete(id); }}
+            onSave={async data => { await weatherService.add(data); writeAudit('create','tea_weather',`Added weather: ${data.date} ${data.condition||''}`); }}
+            onDelete={async id => { if (window.confirm('Delete?')) { await weatherService.delete(id); writeAudit('delete','tea_weather',`Deleted weather ${id}`); } }}
           />
         )}
       </div>

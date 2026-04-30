@@ -100,7 +100,7 @@ export default function SettlementsTab({
               <table className="ch-table">
                 <thead><tr><th>Date</th><th>Worker</th><th>Amount</th><th>Notes</th>{isAdmin&&<th></th>}</tr></thead>
                 <tbody>
-                  {settlements.map(s=>(
+                  {[...settlements].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(s=>(
                     <tr key={s.id}>
                       <td>{s.date}</td><td>{s.worker}</td>
                       <td style={{color:'var(--success)'}}>{inr(s.netPaid)}</td>

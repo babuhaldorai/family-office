@@ -79,17 +79,30 @@ export function AdvancesTab({isAdmin,advances,workerList,onSave,onMarkDeducted,o
 export function MaintenanceTab({isAdmin,maintenance,workerList,fieldList,onSave,onDelete}){
   const fields=fieldList;
   const workers=workerList;
-  const [form,setForm]=useState({date:todayStr(),field:fields[0]||'',task:MAINT_TASKS[0],worker:workers[0]||'',days:'1',rate:'',notes:''});
+  const [form,setForm]=useState({date:todayStr(),field:fields[0]||'',task:MAINT_TASKS[0],worker:workers[0]||'',days:'1',rate:'',notes:'',urea:'',ureaRate:'',ammonia:'',ammoniaRate:'',mixed:'',mixedRate:''});
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
   const save=async()=>{
     const rate=parseFloat(form.rate)||0,days=parseFloat(form.days)||1;
     const d=form.date?new Date(form.date):new Date();
+    let cost=rate*days;
+    let fertData={};
+    if(form.task==='Fertilizing'){
+      const urea=parseInt(form.urea)||0, ureaRate=parseFloat(form.ureaRate)||0;
+      const ammonia=parseInt(form.ammonia)||0, ammoniaRate=parseFloat(form.ammoniaRate)||0;
+      const mixed=parseInt(form.mixed)||0, mixedRate=parseFloat(form.mixedRate)||0;
+      const totalBags=urea+ammonia+mixed;
+      const bagCost=(urea*ureaRate)+(ammonia*ammoniaRate)+(mixed*mixedRate);
+      const labourCost=rate*days; // days × rate from the main form
+      cost=bagCost+labourCost; // total = bags + labour
+      fertData={urea,ureaRate,ammonia,ammoniaRate,mixed,mixedRate,totalBags,bagCost,labourCost,fertCost:cost};
+    }
+    const d2=form.date?new Date(form.date):new Date();
     await onSave({
-      ...form,days,rate,cost:rate*days,
-      year:d.getFullYear(),
-      month:d.getMonth()+1,
+      ...form,...fertData,days,rate,cost,
+      year:d2.getFullYear(),
+      month:d2.getMonth()+1,
     });
-    setForm(f=>({...f,rate:'',notes:''}));
+    setForm(f=>({...f,rate:'',notes:'',urea:'',ureaRate:'',ammonia:'',ammoniaRate:'',mixed:'',mixedRate:''}));
   };
   const total=maintenance.reduce((s,e)=>s+(e.cost||0),0);
   return(
@@ -117,25 +130,83 @@ export function MaintenanceTab({isAdmin,maintenance,workerList,fieldList,onSave,
             <div className="ch-form-group"><label>Rate per Day (₹)</label><input className="ch-input" type="number" step="0.01" value={form.rate} onChange={e=>set('rate',e.target.value)}/></div>
             <div className="ch-form-group"><label>Notes</label><input className="ch-input" value={form.notes} onChange={e=>set('notes',e.target.value)}/></div>
           </div>
-          {form.rate&&form.days&&<div style={{fontSize:13,color:'var(--text)',marginBottom:10}}>Cost: <strong>{inr((parseFloat(form.rate)||0)*(parseFloat(form.days)||1))}</strong></div>}
+          {/* Fertilizer details — shown only for Fertilizing task */}
+          {form.task==='Fertilizing'&&(
+            <div style={{marginTop:12,padding:'12px 14px',background:'var(--surface2)',borderRadius:'var(--radius)',border:'1px solid var(--border)'}}>
+              <div style={{fontWeight:600,fontSize:'0.85rem',marginBottom:4,color:'var(--text)'}}>🌿 Fertilizer Bags</div>
+              <div style={{fontSize:'0.78rem',color:'var(--muted)',marginBottom:10}}>Labour is logged separately as worker days above.</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:10}}>
+                <div style={{padding:'10px 12px',background:'var(--surface)',borderRadius:'var(--radius)',border:'1px solid var(--border)'}}>
+                  <div style={{fontWeight:600,fontSize:'0.82rem',marginBottom:8,color:'var(--tea-light)'}}>Urea</div>
+                  <div className="ch-form-group" style={{marginBottom:8}}><label>Bags</label><input className="ch-input" type="number" min="0" value={form.urea} onChange={e=>set('urea',e.target.value)} placeholder="0"/></div>
+                  <div className="ch-form-group"><label>Rate per Bag (₹)</label><input className="ch-input" type="number" step="0.01" value={form.ureaRate} onChange={e=>set('ureaRate',e.target.value)} placeholder="0"/></div>
+                  {(form.urea||form.ureaRate)&&<div style={{marginTop:6,fontSize:'0.78rem',color:'var(--accent)',fontWeight:600}}>{inr((parseInt(form.urea)||0)*(parseFloat(form.ureaRate)||0))}</div>}
+                </div>
+                <div style={{padding:'10px 12px',background:'var(--surface)',borderRadius:'var(--radius)',border:'1px solid var(--border)'}}>
+                  <div style={{fontWeight:600,fontSize:'0.82rem',marginBottom:8,color:'var(--rental-light)'}}>Ammonia</div>
+                  <div className="ch-form-group" style={{marginBottom:8}}><label>Bags</label><input className="ch-input" type="number" min="0" value={form.ammonia} onChange={e=>set('ammonia',e.target.value)} placeholder="0"/></div>
+                  <div className="ch-form-group"><label>Rate per Bag (₹)</label><input className="ch-input" type="number" step="0.01" value={form.ammoniaRate} onChange={e=>set('ammoniaRate',e.target.value)} placeholder="0"/></div>
+                  {(form.ammonia||form.ammoniaRate)&&<div style={{marginTop:6,fontSize:'0.78rem',color:'var(--accent)',fontWeight:600}}>{inr((parseInt(form.ammonia)||0)*(parseFloat(form.ammoniaRate)||0))}</div>}
+                </div>
+                <div style={{padding:'10px 12px',background:'var(--surface)',borderRadius:'var(--radius)',border:'1px solid var(--border)'}}>
+                  <div style={{fontWeight:600,fontSize:'0.82rem',marginBottom:8,color:'var(--warn)'}}>Mix (Urea+Ammonia)</div>
+                  <div className="ch-form-group" style={{marginBottom:8}}><label>Bags</label><input className="ch-input" type="number" min="0" value={form.mixed} onChange={e=>set('mixed',e.target.value)} placeholder="0"/></div>
+                  <div className="ch-form-group"><label>Rate per Bag (₹)</label><input className="ch-input" type="number" step="0.01" value={form.mixedRate} onChange={e=>set('mixedRate',e.target.value)} placeholder="0"/></div>
+                  {(form.mixed||form.mixedRate)&&<div style={{marginTop:6,fontSize:'0.78rem',color:'var(--accent)',fontWeight:600}}>{inr((parseInt(form.mixed)||0)*(parseFloat(form.mixedRate)||0))}</div>}
+                </div>
+              </div>
+            {/* Summary of fertilizer session total */}
+            <div style={{marginTop:10,padding:'10px 12px',background:'var(--surface)',borderRadius:'var(--radius)',fontSize:13,display:'flex',gap:20,flexWrap:'wrap'}}>
+              <span>Total bags: <strong>{(parseInt(form.urea)||0)+(parseInt(form.ammonia)||0)+(parseInt(form.mixed)||0)}</strong></span>
+              <span>Bag cost: <strong style={{color:'var(--warn)'}}>{inr((parseInt(form.urea)||0)*(parseFloat(form.ureaRate)||0)+(parseInt(form.ammonia)||0)*(parseFloat(form.ammoniaRate)||0)+(parseInt(form.mixed)||0)*(parseFloat(form.mixedRate)||0))}</strong></span>
+              {(form.days&&form.rate)&&<span>Labour: <strong style={{color:'var(--warn)'}}>{inr((parseFloat(form.days)||0)*(parseFloat(form.rate)||0))}</strong></span>}
+              {(form.days&&form.rate)&&<span>Session total: <strong style={{color:'var(--accent)'}}>{inr((parseInt(form.urea)||0)*(parseFloat(form.ureaRate)||0)+(parseInt(form.ammonia)||0)*(parseFloat(form.ammoniaRate)||0)+(parseInt(form.mixed)||0)*(parseFloat(form.mixedRate)||0)+(parseFloat(form.days)||0)*(parseFloat(form.rate)||0))}</strong></span>}
+            </div>
+            </div>
+          )}
+          {form.task==='Fertilizing'&&form.rate&&form.days&&(
+            <div style={{fontSize:13,color:'var(--text)',marginBottom:10,padding:'6px 10px',background:'var(--surface2)',borderRadius:'var(--radius)'}}>
+              Labour: <strong>{inr((parseFloat(form.rate)||0)*(parseFloat(form.days)||1))}</strong>
+              {' · '}Total (bags+labour): <strong style={{color:'var(--accent)'}}>{inr(
+                (parseInt(form.urea)||0)*(parseFloat(form.ureaRate)||0)+
+                (parseInt(form.ammonia)||0)*(parseFloat(form.ammoniaRate)||0)+
+                (parseInt(form.mixed)||0)*(parseFloat(form.mixedRate)||0)+
+                (parseFloat(form.rate)||0)*(parseFloat(form.days)||1)
+              )}</strong>
+            </div>
+          )}
+          {form.task!=='Fertilizing'&&form.rate&&form.days&&<div style={{fontSize:13,color:'var(--text)',marginBottom:10}}>Cost: <strong>{inr((parseFloat(form.rate)||0)*(parseFloat(form.days)||1))}</strong></div>}
           <button className="ch-btn ch-btn-primary" onClick={save}>Save</button>
         </div>
       )}
       <div className="ch-card" style={{padding:0}}>
         <table className="ch-table">
-          <thead><tr><th>Date</th><th>Field</th><th>Task</th><th>Worker</th><th>Days</th><th>Cost</th>{isAdmin&&<th></th>}</tr></thead>
+          <thead><tr><th>Date</th><th>Field</th><th>Task</th><th>Worker</th><th>Days / Bags</th><th>Details</th><th>Cost</th>{isAdmin&&<th></th>}</tr></thead>
           <tbody>
             {maintenance.length===0&&<tr><td colSpan={7} style={{textAlign:'center',padding:32,color:'var(--muted)'}}>No maintenance logs yet.</td></tr>}
-            {maintenance.map(e=>(
+            {[...maintenance].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(e=>(
               <tr key={e.id}>
                 <td>{e.date}</td><td>{e.field}</td>
                 <td><span className="ch-badge ch-badge-earth">{e.task}</span></td>
-                <td>{e.worker}</td><td>{e.days}</td>
+                <td style={{fontSize:'0.8rem'}}>{e.worker}</td>
+                <td style={{fontSize:'0.82rem'}}>
+                  {e.task==='Fertilizing'
+                    ? <span>{e.totalBags||0} bags</span>
+                    : <span>{e.days}d</span>}
+                </td>
+                <td style={{fontSize:'0.78rem',color:'var(--muted)'}}>
+                  {e.task==='Fertilizing'&&e.totalBags>0
+                    ? <span style={{display:'flex',flexDirection:'column',gap:2}}>
+                        <span>{e.urea>0?`U:${e.urea}×${inr(e.ureaRate||0)} `:''}{e.ammonia>0?`A:${e.ammonia}×${inr(e.ammoniaRate||0)} `:''}{e.mixed>0?`Mix:${e.mixed}×${inr(e.mixedRate||0)}`:''}</span>
+                        {e.labourCost>0&&<span style={{color:'var(--muted)'}}>Labour: {inr(e.labourCost)} ({e.days}d @ {inr(e.rate)}/d)</span>}
+                      </span>
+                    : <span>{e.notes||'—'}</span>}
+                </td>
                 <td style={{fontFamily:'var(--font-mono)'}}>{inr(e.cost)}</td>
                 {isAdmin&&<td><button className="ch-btn ch-btn-danger ch-btn-sm" onClick={()=>onDelete(e.id)}>✕</button></td>}
               </tr>
             ))}
-            {maintenance.length>0&&<tr style={{background:'var(--surface2)',fontWeight:600}}><td colSpan={5} style={{textAlign:'right',color:'var(--muted)'}}>Total</td><td style={{fontFamily:'var(--font-mono)'}}>{inr(total)}</td>{isAdmin&&<td/>}</tr>}
+            {maintenance.length>0&&<tr style={{background:'var(--surface2)',fontWeight:600}}><td colSpan={6} style={{textAlign:'right',color:'var(--muted)'}}>Total</td><td style={{fontFamily:'var(--font-mono)'}}>{inr(total)}</td>{isAdmin&&<td/>}</tr>}
           </tbody>
         </table>
       </div>

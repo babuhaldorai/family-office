@@ -38,6 +38,8 @@ service cloud.firestore {
     match /tea_advances/{id}       { allow read: if isViewer(); allow write: if isAdmin(); }
     match /tea_maintenance/{id}    { allow read: if isViewer(); allow write: if isAdmin(); }
     match /tea_weather/{id}        { allow read: if isViewer(); allow write: if isAdmin(); }
+    match /tea_field_leases/{id}   { allow read: if isViewer(); allow write: if isAdmin(); }
+    match /audit_log/{id}          { allow read: if isAdmin(); allow create: if isSignedIn(); }
     match /workers/{id}            { allow read: if isViewer(); allow write: if isAdmin(); }
     match /agents/{id}             { allow read: if isViewer(); allow write: if isAdmin(); }
     match /fields/{id}             { allow read: if isViewer(); allow write: if isAdmin(); }

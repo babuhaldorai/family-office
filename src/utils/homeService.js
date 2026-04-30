@@ -43,6 +43,10 @@ export const homeExpenseService = {
     const snap = await getDocs(col('home_expenses'));
     return snap2arr(snap).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   },
+  async getAll() {
+    const snap = await getDocs(col('home_expenses'));
+    return snap2arr(snap).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  },
   async getByYear(year) {
     const snap = await getDocs(
       query(col('home_expenses'), where('year', '==', year))

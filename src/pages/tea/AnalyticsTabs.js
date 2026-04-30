@@ -4,14 +4,31 @@ import { inr, agentStats, periodLabel, getFieldAcres } from '../../utils/chaayaS
 import PeriodBar from './PeriodBar';
 
 // ── ANALYTICS TAB ─────────────────────────────────────────────────────────────
-export function AnalyticsTab({ anaH, anaPeriod, setAnaPeriod, fieldList, fields, maintenance }) {
-  const tRev    = anaH.reduce((s, e) => s + (e.agentRev  || 0), 0);
+export function AnalyticsTab({ anaH, anaPeriod, setAnaPeriod, fieldList, fields, maintenance, leases=[] }) {
+  // Include lease revenue in total (filter by same period as harvest)
+  const leaseRevAna = leases
+    .filter(l => {
+      const d    = l.startDate || '';
+      const from = anaPeriod?.from || '2000-01-01';
+      const to   = anaPeriod?.to   || '2099-12-31';
+      if (!d) return true;
+      return d >= from && d <= to;
+    })
+    .reduce((s, l) => s + (parseFloat(String(l.amount || '0').replace(/,/g,'')) || 0), 0);
+  const tRev    = anaH.reduce((s, e) => s + (e.agentRev  || 0), 0) + leaseRevAna;
   const tWages  = anaH.reduce((s, e) => s + (e.workerPay || 0), 0);
 
   // Maintenance filtered to same period
-  const periodMaint = useMemo(() => (maintenance || []).filter(
-    m => m.date >= (anaPeriod.from || '2000-01-01') && m.date <= (anaPeriod.to || '2099-12-31')
-  ), [maintenance, anaPeriod]);
+  const periodMaint = useMemo(() => (maintenance || []).filter(m => {
+    // If record has no date, derive from year/month or include it (don't silently drop)
+    const d = m.date || (m.year && m.month
+      ? `${m.year}-${String(m.month).padStart(2,'0')}-15`
+      : null);
+    if (!d) return true; // no date info — include in all periods
+    const from = anaPeriod.from || '2000-01-01';
+    const to   = anaPeriod.to   || '2099-12-31';
+    return d >= from && d <= to;
+  }), [maintenance, anaPeriod]);
   const tMaint = periodMaint.reduce((s, m) => s + (m.cost || 0), 0);
   const tExp   = tWages + tMaint;
   const tNet   = tRev - tExp;
@@ -21,7 +38,10 @@ export function AnalyticsTab({ anaH, anaPeriod, setAnaPeriod, fieldList, fields,
     const kg    = fh.reduce((s, e) => s + (e.tNet    || 0), 0);
     const rev   = fh.reduce((s, e) => s + (e.agentRev|| 0), 0);
     const wages = fh.reduce((s, e) => s + (e.workerPay||0), 0);
-    const fMaint = periodMaint.filter(m => m.field === name).reduce((s, m) => s + (m.cost || 0), 0);
+    const fMaint = periodMaint.filter(m => {
+      if (!m.field) return false;
+      return m.field.trim().toLowerCase() === name.trim().toLowerCase();
+    }).reduce((s, m) => s + (m.cost || 0), 0);
     const acres = getFieldAcres(fields, name);
     return { name, kg, rev, wages, maint: fMaint, exp: wages + fMaint, acres, rpa: acres > 0 ? rev / acres : 0, net: rev - wages - fMaint };
   }).sort((a, b) => b.rpa - a.rpa), [anaH, fieldList, fields, periodMaint]);
@@ -57,6 +77,13 @@ export function AnalyticsTab({ anaH, anaPeriod, setAnaPeriod, fieldList, fields,
           <div className="ch-kpi-value" style={{ color: tNet >= 0 ? 'var(--success)' : 'var(--danger)' }}>{inr(tNet)}</div>
           <div className={`ch-kpi-sub ${tNet >= 0 ? 'up' : 'down'}`}>{tRev > 0 ? ((tNet / tRev) * 100).toFixed(1) + '% margin' : '—'}</div>
         </div>
+        {leaseRevAna > 0 && (
+          <div className="ch-kpi gold">
+            <div className="ch-kpi-label">Field Lease Revenue</div>
+            <div className="ch-kpi-value" style={{color:'var(--success)'}}>{inr(leaseRevAna)}</div>
+            <div className="ch-kpi-sub up">{leases.filter(l=>{const d=l.startDate||'';const from=anaPeriod?.from||'2000-01-01';const to=anaPeriod?.to||'2099-12-31';return !d||(d>=from&&d<=to);}).length} lease(s)</div>
+          </div>
+        )}
         <div className="ch-kpi earth">
           <div className="ch-kpi-label">Best Field (Rev/Acre)</div>
           <div className="ch-kpi-value" style={{ fontSize: 16 }}>{bestField?.name || '—'}</div>

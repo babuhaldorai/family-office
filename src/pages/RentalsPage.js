@@ -1,17 +1,17 @@
+import { db } from '../firebase';
+import { getDocs, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import React, { useEffect, useState, useMemo } from 'react';
 import { useMobile } from '../hooks/useMobile';
 import { propertyService, tenantService, rentalService } from '../utils/firestoreService';
 import { useAuth } from '../context/AuthContext';
 import { Plus, Pencil, Trash2, X } from 'lucide-react';
 import { fmt } from '../utils/finance';
+import PeriodBar, { calcBounds } from '../components/PeriodBar';
 import RentalYOY from './RentalYOY';
 
-const YEAR  = new Date().getFullYear();
-const YEARS = [YEAR - 2, YEAR - 1, YEAR];
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 function Modal({ open, onClose, title, children, footer }) {
-  const isMobile = useMobile(); // eslint-disable-line no-unused-vars
   if (!open) return null;
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -155,44 +155,30 @@ function TransactionModal({ open, onClose, onSave, initial, properties }) {
 }
 
 // ── Period filter bar (same as Tea) ───────────────────────────────────────────
-const PERIOD_OPTS = [
-  { key: 'this_month', label: 'This Month' },
-  { key: 'last_month', label: 'Last Month' },
-  { key: 'ytd',        label: 'YTD'        },
-  { key: 'last_year',  label: 'Last Year'  },
-  { key: 'all',        label: 'All Time'   },
-];
 
-function PeriodBar({ period, onChange }) {
-  return (
-    <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:'10px 14px', marginBottom:20 }}>
-      <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
-        {PERIOD_OPTS.map(o => (
-          <button key={o.key}
-            style={{ padding:'5px 13px', borderRadius:'var(--radius)', border:'1px solid var(--border2)', background: period.preset===o.key?'var(--accent)':'transparent', color: period.preset===o.key?'#0f1117':'var(--muted)', fontFamily:'var(--font-body)', fontSize:'0.8rem', fontWeight:500, cursor:'pointer', transition:'all .15s' }}
-            onClick={() => onChange(o.key)}>
-            {o.label}
-          </button>
-        ))}
-      </div>
-      <span style={{ marginLeft:'auto', fontSize:'0.78rem', color:'var(--muted)', fontStyle:'italic' }}>{period.label}</span>
-    </div>
-  );
-}
 
 // ── Main page ─────────────────────────────────────────────────────────────────
+
 export default function RentalsPage() {
-  const isMobile = useMobile(); // eslint-disable-line no-unused-vars
-  const { isAdmin } = useAuth();
+  const { isAdmin, user: authUser } = useAuth();
+  const userEmail = authUser?.email || 'unknown';
+  const writeAudit = (action, col, summary) => {
+    addDoc(collection(db, 'audit_log'), {
+      action, collection: col,
+      summary: summary || '',
+      userEmail,
+      timestamp: serverTimestamp(),
+    }).catch(e => console.error('[Audit fail]', e.code, e.message));
+  };
   const [tab, setTab]           = useState('overview');
   const [properties, setProperties] = useState([]);
   const [tenants, setTenants]       = useState([]);
   const [transactions, setTransactions] = useState([]);
-  const [txYear, setTxYear]     = useState(YEAR);
+  const [txPeriod, setTxPeriod] = useState({ preset:'ytd', ...calcBounds('ytd') });
   const [propFilter, setPropFilter] = useState('');
   const [tenantFilter, setTenantFilter] = useState('all');
   const [loading, setLoading]   = useState(true);
-  const [periodKey, setPeriodKey] = useState('ytd');
+  const [dashPeriod, setDashPeriod] = useState({ preset:'ytd', ...calcBounds('ytd') });
 
   const [propModal,   setPropModal]   = useState({ open: false, initial: null });
   const [tenantModal, setTenantModal] = useState({ open: false, initial: null });
@@ -200,49 +186,45 @@ export default function RentalsPage() {
 
   const load = async () => {
     setLoading(true);
-    const [p, t, tx] = await Promise.all([
+    const [p, t, txSnap] = await Promise.all([
       propertyService.getAll(),
       tenantService.getAll(),
-      rentalService.getTransactions(txYear),
+      getDocs(collection(db, 'rental_transactions')),
     ]);
-    setProperties(p); setTenants(t); setTransactions(tx);
+    // Load ALL transactions, filter in JS for correct period/year filtering
+    const allTx = txSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    setProperties(p); setTenants(t); setTransactions(allTx);
     setLoading(false);
   };
-  useEffect(() => { load(); }, [txYear]); // eslint-disable-line
+  useEffect(() => { load(); }, []); // eslint-disable-line
 
   // Period bounds
-  const period = useMemo(() => {
-    const now = new Date(), y = now.getFullYear(), m = now.getMonth();
-    const f2  = d => d.toISOString().slice(0,10);
-    const bounds = {
-      this_month: { from: f2(new Date(y,m,1)),   to: f2(new Date(y,m+1,0)) },
-      last_month: { from: f2(new Date(y,m-1,1)), to: f2(new Date(y,m,0))   },
-      ytd:        { from: `${y}-01-01`,           to: f2(now)               },
-      last_year:  { from: `${y-1}-01-01`,         to: `${y-1}-12-31`        },
-      all:        { from: '2000-01-01',            to: '2099-12-31'          },
-    };
-    const labels = {
-      this_month: new Date(y,m,1).toLocaleString('en-IN',{month:'long',year:'numeric'}),
-      last_month: new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'}),
-      ytd:        `Jan – ${now.toLocaleString('en-IN',{month:'short'})} ${y} (YTD)`,
-      last_year:  `${y-1} (full year)`,
-      all:        'All Time',
-    };
-    return { preset: periodKey, ...bounds[periodKey], label: labels[periodKey] };
-  }, [periodKey]);
+  const period = dashPeriod;
 
   // How many months in period (for expected rent scaling)
   const periodMonths = useMemo(() => {
     const now = new Date(), m = now.getMonth();
-    return { this_month:1, last_month:1, ytd:m+1, last_year:12, all:12 }[periodKey] || 12;
-  }, [periodKey]);
+    return { this_month:1, last_month:1, ytd:m+1, last_year:12, all:12 }[dashPeriod.preset] || 12;
+  }, [dashPeriod]);
 
   const activeTenantFor = pid => tenants.find(t => t.propertyId === pid && t.status === 'active');
 
   // Period-filtered transactions
   const periodTx = useMemo(() =>
-    transactions.filter(t => !t.date || (t.date >= period.from && t.date <= period.to))
+    transactions.filter(t => {
+      // Date-based filter for dashboard period
+      if (!t.date) return true;
+      return t.date >= period.from && t.date <= period.to;
+    })
   , [transactions, period]);
+
+  // Separate year filter for the transactions log tab
+  const logTx = useMemo(() =>
+    transactions.filter(t => {
+      if (!t.date) return true;
+      return t.date >= (txPeriod.from||'2000-01-01') && t.date <= (txPeriod.to||'2099-12-31');
+    })
+  , [transactions, txPeriod]);
 
   const periodIncome  = periodTx.filter(t => t.type==='income').reduce((s,t)=>s+Number(t.amount),0);
   const periodExpense = periodTx.filter(t => t.type==='expense').reduce((s,t)=>s+Number(t.amount),0);
@@ -263,21 +245,54 @@ export default function RentalsPage() {
   const occupied     = properties.filter(p => activeTenantFor(p.id)).length;
   const expectedRent = properties.reduce((s,p)=>s+Number(p.monthlyRent||0),0);
 
-  // Filtered transactions tab
+  // Filtered transactions tab (uses logTx which is already year-filtered)
   const filteredTx = useMemo(() => {
-    let t = transactions;
-    if (propFilter) t = t.filter(x => x.propertyId === propFilter);
-    return t;
-  }, [transactions, propFilter]);
+    let result = logTx;
+    if (propFilter) result = result.filter(t => t.propertyId === propFilter);
+    return result;
+  }, [logTx, propFilter]);
 
   // Filtered tenants
   const filteredTenants = useMemo(() =>
     tenantFilter==='all' ? tenants : tenants.filter(t=>t.status===tenantFilter)
   , [tenants, tenantFilter]);
 
-  const handleSaveProp   = async d => { if(propModal.initial) await propertyService.update(propModal.initial.id,d); else await propertyService.add(d); load(); };
-  const handleSaveTenant = async d => { if(tenantModal.initial) await tenantService.update(tenantModal.initial.id,d); else await tenantService.add(d); load(); };
-  const handleSaveTx     = async d => { if(txModal.initial) await rentalService.update(txModal.initial.id,d); else await rentalService.add(d); load(); };
+  const isMobile = useMobile();
+  const checkBeforeDelete = (type, id) => {
+    if (type === 'property') {
+      const txCount = transactions.filter(t => t.propertyId === id).length;
+      const tCount  = tenants.filter(t => t.propertyId === id).length;
+      if (txCount + tCount > 0) {
+        alert(`❌ Cannot delete — this property has ${txCount} transaction(s) and ${tCount} tenant(s). Delete those first.`);
+        return false;
+      }
+    }
+    if (type === 'tenant') {
+      const txCount = transactions.filter(t => t.tenantId === id).length;
+      if (txCount > 0) {
+        alert(`❌ Cannot delete — this tenant has ${txCount} transaction(s). Delete those first.`);
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const handleSaveProp   = async d => { if(propModal.initial){ await propertyService.update(propModal.initial.id,d); writeAudit('update','properties',`Updated property: ${d.name}`); }else{ await propertyService.add(d); writeAudit('create','properties',`Added property: ${d.name}`); } load(); };
+  const handleSaveTenant = async d => { if(tenantModal.initial){ await tenantService.update(tenantModal.initial.id,d); writeAudit('update','tenants',`Updated tenant: ${d.name}`); }else{ await tenantService.add(d); writeAudit('create','tenants',`Added tenant: ${d.name}`); } load(); };
+  const handleSaveTx = async d => {
+    if (!d.date)       { alert('Please enter a date');        return; }
+    if (!d.type)       { alert('Please select income/expense'); return; }
+    if (!d.amount || Number(d.amount) <= 0) { alert('Please enter a valid amount'); return; }
+    if (!d.propertyId) { alert('Please select a property');   return; }
+    if (txModal.initial) {
+      await rentalService.update(txModal.initial.id, d);
+      writeAudit('update','rental_transactions',`Updated ${d.type}: ${d.amount} for property on ${d.date}`);
+    } else {
+      await rentalService.add(d);
+      writeAudit('create','rental_transactions',`Added ${d.type}: ${d.amount} for property on ${d.date}`);
+    }
+    load();
+  };
 
   const TABS = [
     { key:'overview',     label:'⌂ Overview'      },
@@ -312,7 +327,7 @@ export default function RentalsPage() {
         {tab==='overview' && (
           <div>
             {/* Period filter */}
-            <PeriodBar period={period} onChange={setPeriodKey} />
+            <PeriodBar period={dashPeriod} onChange={setDashPeriod} />
 
             {/* KPI strip */}
             <div className="stat-grid" style={{ marginBottom:24 }}>
@@ -458,7 +473,7 @@ export default function RentalsPage() {
                         {isAdmin && (
                           <div style={{ display:'flex', gap:6, marginTop:12 }}>
                             <button className="btn btn-ghost btn-sm" onClick={()=>setPropModal({open:true,initial:p})}><Pencil size={12}/> Edit</button>
-                            <button className="btn btn-danger btn-sm" onClick={async()=>{ if(window.confirm(`Delete "${p.name}"?`)){await propertyService.delete(p.id);load();}}}><Trash2 size={12}/></button>
+                            <button className="btn btn-danger btn-sm" onClick={async()=>{ if(!checkBeforeDelete('property',p.id)) return; if(window.confirm(`Delete "${p.name}"?`)){await propertyService.delete(p.id); writeAudit('delete','properties',`Deleted property: ${p.name}`); load();}}}><Trash2 size={12}/></button>
                           </div>
                         )}
                       </div>
@@ -506,7 +521,7 @@ export default function RentalsPage() {
                           <td><span style={{ fontSize:'0.82rem', color:days===null?'var(--muted)':days<0?'var(--danger)':days<30?'var(--warn)':'var(--muted)' }}>{days===null?'—':days<0?`${Math.abs(days)}d overdue`:`${days}d`}</span></td>
                           {isAdmin&&<td><div style={{ display:'flex', gap:4 }}>
                             <button className="btn btn-ghost btn-sm" onClick={()=>setTenantModal({open:true,initial:t})}><Pencil size={12}/></button>
-                            <button className="btn btn-danger btn-sm" onClick={async()=>{ if(window.confirm('Delete?')){await tenantService.delete(t.id);load();}}}><Trash2 size={12}/></button>
+                            <button className="btn btn-danger btn-sm" onClick={async()=>{ if(!checkBeforeDelete('tenant',t.id)) return; if(window.confirm('Delete?')){await tenantService.delete(t.id); writeAudit('delete','tenants',`Deleted tenant: ${t.name||t.id}`); load();}}}><Trash2 size={12}/></button>
                           </div></td>}
                         </tr>
                       );
@@ -522,11 +537,13 @@ export default function RentalsPage() {
         {tab==='transactions' && (
           <div>
             {isAdmin && <div style={{ marginBottom:16 }}><button className="btn btn-primary" onClick={()=>setTxModal({open:true,initial:null})}><Plus size={14}/> Add Transaction</button></div>}
-            <div style={{ display:'flex', gap:12, marginBottom:20, flexWrap:'wrap', alignItems:'center' }}>
-              <div className="year-selector">
-                {YEARS.map(y=><button key={y} className={txYear===y?'active':''} onClick={()=>setTxYear(y)}>{y}</button>)}
-              </div>
-              <select style={{ maxWidth:220 }} value={propFilter} onChange={e=>setPropFilter(e.target.value)}>
+            {/* ── Transactions filter ── */}
+            <div style={{marginBottom:16}}>
+              <PeriodBar period={txPeriod} onChange={setTxPeriod} />
+            </div>
+            <div style={{marginBottom:16}}>
+              <select value={propFilter} onChange={e=>setPropFilter(e.target.value)}
+                style={{padding:'5px 10px',borderRadius:6,border:'1px solid var(--border)',background:'var(--surface2)',color:'var(--text)',fontSize:'0.82rem'}}>
                 <option value="">All properties</option>
                 {properties.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
@@ -550,7 +567,7 @@ export default function RentalsPage() {
                   <thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Property</th><th>Description</th><th style={{ textAlign:'right' }}>Amount</th>{isAdmin&&<th></th>}</tr></thead>
                   <tbody>
                     {filteredTx.length===0&&<tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--muted)' }}>No transactions yet.</td></tr>}
-                    {filteredTx.map(t=>{
+                    {[...filteredTx].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(t=>{
                       const propName=properties.find(p=>p.id===t.propertyId)?.name||'—';
                       return(
                         <tr key={t.id}>
@@ -564,7 +581,7 @@ export default function RentalsPage() {
                           </td>
                           {isAdmin&&<td><div style={{ display:'flex', gap:4 }}>
                             <button className="btn btn-ghost btn-sm" onClick={()=>setTxModal({open:true,initial:t})}><Pencil size={12}/></button>
-                            <button className="btn btn-danger btn-sm" onClick={async()=>{ if(window.confirm('Delete?')){await rentalService.delete(t.id);load();}}}><Trash2 size={12}/></button>
+                            <button className="btn btn-danger btn-sm" onClick={async()=>{ if(window.confirm('Delete?')){await rentalService.delete(t.id); writeAudit('delete','rental_transactions',`Deleted transaction ${t.id}`); load();}}}><Trash2 size={12}/></button>
                           </div></td>}
                         </tr>
                       );

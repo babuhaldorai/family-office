@@ -42,52 +42,50 @@ export default function Overview() {
   const [period, setPeriod] = useState({ preset:'ytd', ...calcBounds('ytd') });
 
   // Dashboard data
-  const [rentTx, setRentTx] = useState([]);
+  const [rentTx,  setRentTx]   = useState([]);
+  const [rentTxPrev, setRentTxPrev] = useState([]);
   const [homeExp, setHomeExp]  = useState([]);
   const [rentLoading, setRentL] = useState(true);
+  const [rentLoadingPrev, setRentLP] = useState(true);
   const [homeLoading, setHomeL] = useState(true);
-  // Fetch ALL tea transactions (all years) directly for Overview
-  const [teaTx, setTeaTx] = useState([]);
-  const [teaSettlements, setTeaSettlements] = useState([]);
-  const [teaLoading, setTeaLoading] = useState(true);
+  // Fetch harvest-only transactions (no maintenance) for each year to avoid duplication
+  const {transactions:teaTxCur,  loading:teaLoadingCur}  = useTeaFinancials(YEAR,     {includeMaintenance:false});
+  const {transactions:teaTxPrev, loading:teaLoadingPrev} = useTeaFinancials(YEAR - 1, {includeMaintenance:false});
+  // Merge both years — deduplicate by id to prevent double-counting
+  // (maintenance records are fetched without year filter in both hook calls)
+  // Fetch ALL maintenance once — prevents double-counting across year hooks
+  const [maintTx, setMaintTx] = useState([]);
   useEffect(() => {
-    setTeaLoading(true);
-    Promise.all([
-      getDocs(collection(db, 'tea_harvest')),
-      getDocs(collection(db, 'tea_maintenance')),
-      getDocs(collection(db, 'tea_field_leases')),
-      getDocs(collection(db, 'tea_settlements')),
-    ]).then(([hSnap, mSnap, lSnap, sSnap]) => {
-      setTeaSettlements(sSnap.docs.map(d=>({id:d.id,...d.data()})));
-      const txs = [];
-      // Harvest income + labour
-      hSnap.docs.forEach(d => {
-        const h = { id: d.id, ...d.data() };
-        const mo = h.month ? Number(h.month) : (h.date ? new Date(h.date).getMonth()+1 : 1);
-        const yr = h.year  ? Number(h.year)  : (h.date ? new Date(h.date).getFullYear() : YEAR);
-        if (h.agentRev > 0) txs.push({ id:`inc-${h.id}`, date:h.date, type:'income', category:'Tea Sales', amount:h.agentRev||0, month:mo, year:yr, segment:'Tea' });
-        if (h.workerPay > 0) txs.push({ id:`lab-${h.id}`, date:h.date, type:'expense', category:'Labour', amount:h.workerPay||0, month:mo, year:yr, segment:'Tea' });
-      });
-      // Maintenance expenses
-      mSnap.docs.forEach(d => {
-        const m = { id: d.id, ...d.data() };
-        const cost = m.cost || 0; if (cost <= 0) return;
-        const mo = m.month ? Number(m.month) : (m.date ? new Date(m.date).getMonth()+1 : 1);
-        const yr = m.year  ? Number(m.year)  : (m.date ? new Date(m.date).getFullYear() : YEAR);
+    getDocs(collection(db, 'tea_maintenance')).then(snap => {
+      const txs = snap.docs.map(d => ({ id: d.id, ...d.data() })).map(m => {
+        const yr = m.year ? Number(m.year) : (m.date ? new Date(m.date).getFullYear() : YEAR);
+        const mo = m.month ? Number(m.month) : (m.date ? new Date(m.date).getMonth() + 1 : 1);
         const date = m.date || `${yr}-${String(mo).padStart(2,'0')}-15`;
-        txs.push({ id:`maint-${m.id}`, date, type:'expense', category:m.task||'Maintenance', amount:cost, month:mo, year:yr, segment:'Tea' });
-      });
-      // Lease income
-      lSnap.docs.forEach(d => {
-        const l = { id: d.id, ...d.data() };
-        const amt = Number(l.amount)||0; if (amt <= 0) return;
-        const yr = l.year ? Number(l.year) : (l.startDate ? new Date(l.startDate).getFullYear() : YEAR);
-        const mo = l.month ? Number(l.month) : (l.startDate ? new Date(l.startDate).getMonth()+1 : 1);
-        txs.push({ id:`lease-${l.id}`, date:l.startDate, type:'income', category:'Field Lease', amount:amt, month:mo, year:yr, segment:'Tea' });
-      });
-      setTeaTx(txs);
-    }).catch(() => setTeaTx([])).finally(() => setTeaLoading(false));
+        return {
+          id: `maint-${m.id}`,
+          date, type: 'expense',
+          category: m.task || 'Maintenance',
+          amount: m.cost || 0,
+          month: mo, year: yr,
+          segment: 'Tea',
+        };
+      }).filter(t => t.amount > 0);
+      setMaintTx(txs);
+    }).catch(() => setMaintTx([]));
   }, []);
+
+  const teaTx = useMemo(()=>{
+    // Harvest txs deduplicated across years + maintenance fetched once (no duplication)
+    const seen = new Set();
+    const harvestTxs = [...teaTxCur, ...teaTxPrev].filter(t => {
+      const key = t.id || `${t.category}-${t.amount}-${t.date}-${t.month}-${t.year}`;
+      if(seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    return [...harvestTxs, ...maintTx];
+  },[teaTxCur,teaTxPrev,maintTx]);
+  const teaLoading = teaLoadingCur || teaLoadingPrev;
 
 
   const allRentTx = rentTx; // already merged all years
@@ -115,7 +113,7 @@ export default function Overview() {
       rentalService.getTransactions(YEAR),
       rentalService.getTransactions(YEAR-1),
       rentalService.getTransactions(YEAR-2),
-    ]).then(([a,b,cc])=>{ setRentTx([...a,...b,...cc]); }).finally(()=>setRentL(false));
+    ]).then(([a,b,cc])=>{ setRentTx([...a,...b,...cc]); }).finally(()=>{ setRentL(false); setRentLP(false); });
     homeExpenseService.getAll().then(e=>setHomeExp(e)).finally(()=>setHomeL(false));
   },[]);
 
@@ -199,7 +197,7 @@ export default function Overview() {
 
   // Full-year chart
   const homeMonthly=useMemo(()=>{const m=Array.from({length:12},()=>0);homeExp.filter(e=>!e.year||Number(e.year)===YEAR).forEach(e=>{const mo=(e.month||1)-1;if(mo>=0&&mo<12)m[mo]+=Number(e.amount||0);});return m;},[homeExp]);
-  const chartData=buildMonthlyPL([...teaTx.filter(t=>Number(t.year)===YEAR),...rentTx]).map((m,i)=>({month:m.label,Income:m.income,Expenses:m.expense+homeMonthly[i],'Net P&L':m.income-(m.expense+homeMonthly[i])}));
+  const chartData=buildMonthlyPL([...teaTxCur,...rentTx]).map((m,i)=>({month:m.label,Income:m.income,Expenses:m.expense+homeMonthly[i],'Net P&L':m.income-(m.expense+homeMonthly[i])}));
 
   const dashLoading=teaLoading||rentLoading||homeLoading;
 
@@ -305,7 +303,7 @@ export default function Overview() {
         {mainTab==='dashboard'&&(
           <div>
             <PeriodBar period={period} onChange={setPeriod}/>
-            {(teaLoading||rentLoading||homeLoading)&&<div style={{padding:40,color:'var(--muted)'}}>Loading…</div>}
+            {(teaLoading||rentLoading||rentLoadingPrev||homeLoading)&&<div style={{padding:40,color:'var(--muted)'}}>Loading…</div>}
             {!dashLoading&&(()=>{
               // Derived expense breakdown for Tea
               const teaLabour = pTea.filter(t=>t.type==='expense'&&t.category==='Labour').reduce((s,t)=>s+Number(t.amount),0);
@@ -328,28 +326,19 @@ export default function Overview() {
                   )}
 
                   {/* Unpaid Labour Warning Banner */}
-                  {(()=>{
-                    // All-time unpaid = total wages ever - total settled ever
-                    const allWages   = teaTx.filter(t=>t.type==='expense'&&t.category==='Labour').reduce((s,t)=>s+Number(t.amount),0);
-                    const allSettled = teaSettlements.reduce((s,st)=>s+(Number(st.netPaid)||0),0);
-                    const unpaid     = Math.max(0, allWages - allSettled);
-                    // Period wages for context
-                    const periodWages = pTea.filter(t=>t.type==='expense'&&t.category==='Labour').reduce((s,t)=>s+Number(t.amount),0);
-                    if (unpaid <= 0) return null;
-                    return(
-                      <div style={{display:'flex',alignItems:'center',gap:10,
-                        background:'rgba(224,146,74,0.1)',border:'1px solid rgba(224,146,74,0.35)',
-                        borderRadius:'var(--radius)',padding:'10px 16px',marginBottom:16,fontSize:'0.83rem'}}>
-                        <span style={{fontSize:18}}>⚠️</span>
-                        <div>
-                          <strong style={{color:'var(--warn)'}}>Unpaid worker wages: {fmt(unpaid)}</strong>
-                          <span style={{color:'var(--muted)',marginLeft:6,fontSize:'0.78rem'}}>
-                            (Period wages: {fmt(periodWages)} · All-time earned: {fmt(allWages)} · Settled: {fmt(allSettled)})
-                          </span>
-                        </div>
+                  {teaDash && teaDash.totalWages > 0 && (
+                    <div style={{display:'flex',alignItems:'center',gap:10,
+                      background:'rgba(224,146,74,0.1)',border:'1px solid rgba(224,146,74,0.35)',
+                      borderRadius:'var(--radius)',padding:'10px 16px',marginBottom:16,fontSize:'0.83rem'}}>
+                      <span style={{fontSize:18}}>⚠️</span>
+                      <div>
+                        <strong style={{color:'var(--warn)'}}>Worker wages recorded: {fmt(teaDash.totalWages)}</strong>
+                        <span style={{color:'var(--muted)',marginLeft:8,fontSize:'0.78rem'}}>
+                          Check Tea → Settlements to verify all wages are paid.
+                        </span>
                       </div>
-                    );
-                  })()}
+                    </div>
+                  )}
                   {/* Top KPI strip */}
                   <div className="stat-grid" style={{marginBottom:24}}>
                     <div className="stat-card income">
@@ -411,34 +400,20 @@ export default function Overview() {
                             </div>
                           </div>
                         )}
-                        {/* Each maintenance task + subtotal */}
-                        {(()=>{
-                          const maintEntries=Object.entries(
-                            pTea.filter(t=>t.type==='expense'&&t.category!=='Labour')
-                              .reduce((acc,t)=>{acc[t.category||'Maintenance']=(acc[t.category||'Maintenance']||0)+Number(t.amount);return acc;},{})
-                          ).sort((a,b)=>b[1]-a[1]);
-                          const maintTotal=maintEntries.reduce((s,[,v])=>s+v,0);
-                          return(<>
-                            {maintEntries.map(([task,amt])=>(
-                              <div key={task} style={{marginBottom:6}}>
-                                <div style={{display:'flex',justifyContent:'space-between',fontSize:'0.78rem',marginBottom:2}}>
-                                  <span style={{color:'var(--muted)'}}>{task}</span><span style={{color:'var(--danger)'}}>{fmt(amt)}</span>
-                                </div>
-                                <div style={{height:4,background:'var(--surface2)',borderRadius:2,overflow:'hidden'}}>
-                                  <div style={{height:'100%',width:`${teaExp>0?(amt/teaExp)*100:0}%`,background:'var(--warn)',borderRadius:2}}/>
-                                </div>
-                              </div>
-                            ))}
-                            {/* Maintenance subtotal */}
-                            {maintTotal>0&&(
-                              <div style={{display:'flex',justifyContent:'space-between',fontSize:'0.78rem',fontWeight:700,
-                                borderTop:'1px solid var(--border)',paddingTop:6,marginTop:2,marginBottom:6}}>
-                                <span style={{color:'var(--text)'}}>Maintenance Subtotal</span>
-                                <span style={{color:'var(--danger)'}}>{fmt(maintTotal)}</span>
-                              </div>
-                            )}
-                          </>);
-                        })()}
+                        {/* Each maintenance task */}
+                        {Object.entries(
+                          pTea.filter(t=>t.type==='expense'&&t.category!=='Labour')
+                            .reduce((acc,t)=>{acc[t.category||'Maintenance']=(acc[t.category||'Maintenance']||0)+Number(t.amount);return acc;},{})
+                        ).sort((a,b)=>b[1]-a[1]).map(([task,amt])=>(
+                          <div key={task} style={{marginBottom:6}}>
+                            <div style={{display:'flex',justifyContent:'space-between',fontSize:'0.78rem',marginBottom:2}}>
+                              <span style={{color:'var(--muted)'}}>{task}</span><span style={{color:'var(--danger)'}}>{fmt(amt)}</span>
+                            </div>
+                            <div style={{height:4,background:'var(--surface2)',borderRadius:2,overflow:'hidden'}}>
+                              <div style={{height:'100%',width:`${teaExp>0?(amt/teaExp)*100:0}%`,background:'var(--warn)',borderRadius:2}}/>
+                            </div>
+                          </div>
+                        ))}
                         {teaInc>0&&<div style={{marginTop:8,fontSize:'0.72rem',color:'var(--muted)'}}>Margin: <strong style={{color:teaInc-teaExp>=0?'var(--success)':'var(--danger)'}}>{(((teaInc-teaExp)/teaInc)*100).toFixed(1)}%</strong></div>}
                       </div>
                     </div>

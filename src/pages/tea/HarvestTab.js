@@ -4,7 +4,7 @@ import {inr} from '../../utils/chaayaService';
 import BagBuilder from './BagBuilder';
 
 export default function HarvestTab({
-  isAdmin,bags,setBags,deductMode,setDeductMode,
+  isAdmin,leasedFields=new Set(),bags,setBags,deductMode,setDeductMode,
   hDate,setHDate,hWorker,setHWorker,hField,setHField,hAgent,setHAgent,
   workerList,agentList,fieldList,rates,editingHarvestId,
   saveHarvest,savingHarvest,clearForm,
@@ -45,6 +45,11 @@ export default function HarvestTab({
                 {workerList.map(w=><option key={w}>{w}</option>)}
               </select></div>
             <div className="ch-form-group"><label>Field</label>
+              {leasedFields.has(hField) && (
+                <div style={{marginTop:4,padding:'4px 8px',background:'rgba(224,92,92,0.15)',border:'1px solid var(--danger)',borderRadius:6,fontSize:'0.75rem',color:'var(--danger)',fontWeight:600}}>
+                  🔒 This field is on lease — harvest cannot be logged
+                </div>
+              )}
               <select className="ch-input" value={hField} onChange={e=>setHField(e.target.value)}>
                 {fieldList.map(f=><option key={f}>{f}</option>)}
               </select></div>
@@ -67,9 +72,9 @@ export default function HarvestTab({
       <div className="ch-card" style={{padding:0}}>
         <div style={{padding:'14px 20px 0',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}}>
           <div style={{fontFamily:'var(--font-display)',fontSize:16,fontWeight:600,color:'var(--text)'}}>Harvest Log</div>
-          <select className="ch-input" style={{width:180}} value={harvestFilter} onChange={e=>setHarvestFilter(e.target.value)}>
+          <select className="ch-input" style={{width:'auto',minWidth:200,maxWidth:360}} value={harvestFilter} onChange={e=>setHarvestFilter(e.target.value)}>
             <option value="all">All Entries</option>
-            {harvestWeeks.map(w=><option key={w} value={w}>{w}</option>)}
+            {harvestWeeks.map(w=>typeof w==='object'?<option key={w.value} value={w.value}>{w.label}</option>:<option key={w} value={w}>{w}</option>)}
           </select>
         </div>
         <div style={{overflowX:'auto'}}>
@@ -88,7 +93,7 @@ export default function HarvestTab({
                   No harvest sessions yet.
                 </td></tr>
               )}
-              {filteredHarvest.map(e=>(
+              {[...filteredHarvest].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(e=>(
                 <tr key={e.id}>
                   <td>{e.date}</td><td>{e.worker}</td>
                   <td><span className="ch-badge ch-badge-green">{e.field}</span></td>

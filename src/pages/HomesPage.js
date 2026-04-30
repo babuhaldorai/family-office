@@ -1,10 +1,13 @@
 import { useMobile } from '../hooks/useMobile';
+import { db } from '../firebase';
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import React, { useEffect, useState, useMemo } from 'react';
 import HomeYOY from './HomeYOY';
 import { homePropertyService, homeExpenseService, HOME_CATEGORIES } from '../utils/homeService';
 import { useAuth } from '../context/AuthContext';
 import { Plus, Pencil, Trash2, X } from 'lucide-react';
 import { fmt } from '../utils/finance';
+import PeriodBar, { calcBounds } from '../components/PeriodBar';
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 function Modal({ open, onClose, title, children, footer }) {
@@ -84,39 +87,26 @@ function ExpenseModal({ open, onClose, onSave, initial, properties }) {
 }
 
 // ── Period filter bar ─────────────────────────────────────────────────────────
-const PERIOD_OPTS = [
-  { key:'this_month', label:'This Month' },
-  { key:'last_month', label:'Last Month' },
-  { key:'ytd',        label:'YTD'        },
-  { key:'last_year',  label:'Last Year'  },
-  { key:'all',        label:'All Time'   },
-];
 
-function PeriodBar({ period, onChange }) {
-  return (
-    <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:'10px 14px', marginBottom:20 }}>
-      <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
-        {PERIOD_OPTS.map(o => (
-          <button key={o.key}
-            style={{ padding:'5px 13px', borderRadius:'var(--radius)', border:'1px solid var(--border2)', background:period.preset===o.key?'var(--accent)':'transparent', color:period.preset===o.key?'#0f1117':'var(--muted)', fontSize:'0.8rem', fontWeight:500, cursor:'pointer', fontFamily:'var(--font-body)', transition:'all .15s' }}
-            onClick={() => onChange(o.key)}>
-            {o.label}
-          </button>
-        ))}
-      </div>
-      <span style={{ marginLeft:'auto', fontSize:'0.78rem', color:'var(--muted)', fontStyle:'italic' }}>{period.label}</span>
-    </div>
-  );
-}
 
 // ── Main page ─────────────────────────────────────────────────────────────────
+
 export default function HomesPage() {
   const isMobile = useMobile();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user: authUser } = useAuth();
+  const [period, setPeriod] = useState({ preset:'ytd', ...calcBounds('ytd') });
+  const userEmail = authUser?.email || 'unknown';
+  const writeAudit = (action, col, summary) => {
+    addDoc(collection(db, 'audit_log'), {
+      action, collection: col,
+      summary: summary || '',
+      userEmail,
+      timestamp: serverTimestamp(),
+    }).catch(e => console.error('[Audit fail]', e.code, e.message));
+  };
   const [properties, setProperties] = useState([]);
   const [expenses, setExpenses]     = useState([]);
   const [tab, setTab]               = useState('overview');
-  const [periodKey, setPeriodKey]   = useState('ytd');
   const [propFilter, setPropFilter] = useState('');
   const [catFilter, setCatFilter]   = useState('');
   const [propModal, setPropModal]   = useState({ open:false, initial:null });
@@ -131,25 +121,17 @@ export default function HomesPage() {
   useEffect(() => { load(); }, []);
 
   // Period bounds
-  const period = useMemo(() => {
-    const now = new Date(), y = now.getFullYear(), m = now.getMonth();
-    const f2  = d => d.toISOString().slice(0,10);
-    const bounds = {
-      this_month: { from:f2(new Date(y,m,1)),   to:f2(new Date(y,m+1,0))  },
-      last_month: { from:f2(new Date(y,m-1,1)), to:f2(new Date(y,m,0))    },
-      ytd:        { from:`${y}-01-01`,            to:f2(now)                },
-      last_year:  { from:`${y-1}-01-01`,          to:`${y-1}-12-31`         },
-      all:        { from:'2000-01-01',             to:'2099-12-31'           },
-    };
-    const labels = {
-      this_month: new Date(y,m,1).toLocaleString('en-IN',{month:'long',year:'numeric'}),
-      last_month: new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'}),
-      ytd:        `Jan – ${now.toLocaleString('en-IN',{month:'short'})} ${y} (YTD)`,
-      last_year:  `${y-1} (full year)`,
-      all:        'All Time',
-    };
-    return { preset:periodKey, ...bounds[periodKey], label:labels[periodKey] };
-  }, [periodKey]);
+
+  const checkBeforeDelete = (type, id) => {
+    if (type === 'property') {
+      const expCount = expenses.filter(e => e.propertyId === id).length;
+      if (expCount > 0) {
+        alert(`❌ Cannot delete — this home has ${expCount} expense record(s). Delete those first.`);
+        return false;
+      }
+    }
+    return true;
+  };
 
   const propName = id => properties.find(p => p.id === id)?.name || '—';
 
@@ -188,10 +170,30 @@ export default function HomesPage() {
     return Object.entries(map).sort((a,b)=>b[1]-a[1]);
   }, [filteredExp]);
 
-  const handleSaveProp = async d => { if(propModal.initial) await homePropertyService.update(propModal.initial.id,d); else await homePropertyService.add(d); load(); };
-  const handleSaveExp  = async d => { if(expModal.initial) await homeExpenseService.update(expModal.initial.id,d); else await homeExpenseService.add(d); load(); };
-  const deleteProp     = async id => { if(!window.confirm('Delete this home?')) return; await homePropertyService.delete(id); load(); };
-  const deleteExp      = async id => { if(!window.confirm('Delete this expense?')) return; await homeExpenseService.delete(id); load(); };
+
+
+  const handleSaveProp = async d => {
+    if (propModal.initial) { await homePropertyService.update(propModal.initial.id,d); writeAudit('update','home_properties',`Updated home: ${d.name}`); }
+    else { await homePropertyService.add(d); writeAudit('create','home_properties',`Added home: ${d.name}`); }
+    load();
+  };
+  const handleSaveExp = async d => {
+    if (expModal.initial) {
+      await homeExpenseService.update(expModal.initial.id, d);
+      writeAudit('update','home_expenses',`Updated ${d.category}: ₹${d.amount} on ${d.date}`);
+    } else {
+      await homeExpenseService.add(d);
+      writeAudit('create','home_expenses',`Added ${d.category}: ₹${d.amount} on ${d.date}`);
+    }
+    load();
+  };
+  const deleteProp = async id => { if(!checkBeforeDelete('property',id)) return; if(!window.confirm('Delete this home?')) return; await homePropertyService.delete(id); writeAudit('delete','home_properties',`Deleted home ${id}`); load(); };
+  const deleteExp = async id => {
+    if (!window.confirm('Delete this expense?')) return;
+    await homeExpenseService.delete(id);
+    writeAudit('delete','home_expenses',`Deleted expense ${id}`);
+    load();
+  };
 
   const TABS = [
     { key:'overview',  label:'⌂ Overview'    },
@@ -224,7 +226,7 @@ export default function HomesPage() {
         {/* ══ OVERVIEW ══ */}
         {tab==='overview' && (
           <div>
-            <PeriodBar period={period} onChange={setPeriodKey} />
+            <PeriodBar period={period} onChange={setPeriod} />
 
             {/* KPI strip */}
             <div className="stat-grid" style={{ marginBottom:24 }}>
@@ -352,7 +354,7 @@ export default function HomesPage() {
           <div>
             {isAdmin && <div style={{ marginBottom:16 }}><button className="btn btn-primary" onClick={()=>setExpModal({open:true,initial:null})}><Plus size={14}/> Log Expense</button></div>}
 
-            <PeriodBar period={period} onChange={setPeriodKey} />
+            <PeriodBar period={period} onChange={setPeriod} />
 
             {/* Filters */}
             <div style={{ display:'flex', gap:12, marginBottom:16, flexWrap:'wrap', alignItems:'center' }}>
@@ -382,7 +384,7 @@ export default function HomesPage() {
                   </thead>
                   <tbody>
                     {filteredExp.length===0&&<tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--muted)' }}>No expenses for this period.</td></tr>}
-                    {filteredExp.map(e=>(
+                    {[...filteredExp].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(e=>(
                       <tr key={e.id}>
                         <td style={{ whiteSpace:'nowrap' }}>{e.date}</td>
                         <td style={{ fontWeight:500 }}>{propName(e.propertyId)}</td>
@@ -415,7 +417,7 @@ export default function HomesPage() {
         {/* ══ BY CATEGORY ══ */}
         {tab==='breakdown' && (
           <div>
-            <PeriodBar period={period} onChange={setPeriodKey} />
+            <PeriodBar period={period} onChange={setPeriod} />
             <div style={{ display:'flex', gap:12, marginBottom:16, flexWrap:'wrap', alignItems:'center' }}>
               <select style={{ maxWidth:220 }} value={propFilter} onChange={e=>setPropFilter(e.target.value)}>
                 <option value="">All homes</option>

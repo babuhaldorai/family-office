@@ -4,9 +4,21 @@ import { inr, kgFmt, periodLabel, getFieldAcres } from '../../utils/chaayaServic
 import { AGENT_COLORS } from './chaayaStyles';
 import PeriodBar from './PeriodBar';
 
-export default function DashboardTab({ dashH, dashPeriod, setDashPeriod, fields, agentList, maintenance, pendingRateSessions }) {
+export default function DashboardTab({ dashH, dashPeriod, setDashPeriod, allHarvest=[], fields, agentList, maintenance, leases=[], settlements=[], advances=[], pendingRateSessions }) {
   const isMobile = useMobile();
-  const tRev    = dashH.reduce((s, e) => s + (e.agentRev  || 0), 0);
+  // Lease revenue: filter leases that overlap with the current period
+  // Lease revenue: count lease if its startDate falls within the selected period
+  // All-time ('2000-01-01' to '2099-12-31') includes everything
+  const leaseRev = leases
+    .filter(l => {
+      const d    = l.startDate || '';
+      const from = dashPeriod?.from || '2000-01-01';
+      const to   = dashPeriod?.to   || '2099-12-31';
+      if (!d) return true; // no date — include everywhere
+      return d >= from && d <= to;
+    })
+    .reduce((s, l) => s + (parseFloat(String(l.amount || '0').replace(/,/g,'')) || 0), 0);
+  const tRev    = dashH.reduce((s, e) => s + (e.agentRev  || 0), 0) + leaseRev;
   const tKg     = dashH.reduce((s, e) => s + (e.tNet      || 0), 0);
   const tWater  = dashH.reduce((s, e) => s + (e.tWaterDed || 0), 0);
   const tBag    = dashH.reduce((s, e) => s + (e.tBagDed   || 0), 0);
@@ -17,17 +29,36 @@ export default function DashboardTab({ dashH, dashPeriod, setDashPeriod, fields,
 
   // Maintenance costs filtered to same period
   const tMaint = (maintenance || [])
-    .filter(m => m.date >= (dashPeriod.from || '2000-01-01') && m.date <= (dashPeriod.to || '2099-12-31'))
+    .filter(m => {
+      const from = dashPeriod?.from || '2000-01-01';
+      const to   = dashPeriod?.to   || '2099-12-31';
+      // Use date field, or derive from year/month, or include if no date info
+      const d = m.date || (m.year && m.month
+        ? `${m.year}-${String(m.month).padStart(2,'0')}-15`
+        : null);
+      if (!d) return true; // no date — include in all periods
+      return d >= from && d <= to;
+    })
     .reduce((s, m) => s + (m.cost || 0), 0);
 
-  const tExpenses = tWages + tMaint;
+  const tExpenses    = tWages + tMaint;
+  // Unpaid wages uses ALL harvest (not period-filtered) vs ALL settlements
+  const allTimeWages = allHarvest.reduce((s,h) => s + (h.workerPay||0), 0);
+  const totalSettled = settlements.reduce((s,st) => s + (Number(st.netPaid)||0), 0);
+  const unpaidWages  = Math.max(0, allTimeWages - totalSettled);
   const tNet      = tRev - tExpenses;
 
   // Expense breakdown by maintenance task
   const maintByTask = useMemo(() => {
-    const filtered = (maintenance || []).filter(
-      m => m.date >= (dashPeriod.from || '2000-01-01') && m.date <= (dashPeriod.to || '2099-12-31')
-    );
+    const filtered = (maintenance || []).filter(m => {
+      const from = dashPeriod?.from || '2000-01-01';
+      const to   = dashPeriod?.to   || '2099-12-31';
+      const d = m.date || (m.year && m.month
+        ? `${m.year}-${String(m.month).padStart(2,'0')}-15`
+        : null);
+      if (!d) return true;
+      return d >= from && d <= to;
+    });
     const map = {};
     filtered.forEach(m => {
       const k = m.task || 'Other';
@@ -59,6 +90,19 @@ export default function DashboardTab({ dashH, dashPeriod, setDashPeriod, fields,
       )}
 
       {/* KPI row */}
+      {unpaidWages > 0 && (
+        <div style={{display:'flex',alignItems:'center',gap:10,
+          background:'rgba(224,146,74,0.1)',border:'1px solid rgba(224,146,74,0.35)',
+          borderRadius:'var(--radius)',padding:'10px 14px',marginBottom:16,fontSize:'0.83rem'}}>
+          <span style={{fontSize:16}}>⚠️</span>
+          <div>
+            <strong style={{color:'var(--warn)'}}>Unpaid worker wages: {inr(unpaidWages)}</strong>
+            <span style={{color:'var(--muted)',marginLeft:6,fontSize:'0.78rem'}}>
+              (Earned: {inr(tWages)} · Settled: {inr(totalSettled)})
+            </span>
+          </div>
+        </div>
+      )}
       <div className="ch-kpi-grid">
         <div className="ch-kpi green">
           <div className="ch-kpi-label">Revenue</div>
@@ -76,6 +120,11 @@ export default function DashboardTab({ dashH, dashPeriod, setDashPeriod, fields,
           <div className={`ch-kpi-sub ${tNet >= 0 ? 'up' : 'down'}`}>
             {tRev > 0 ? ((tNet / tRev) * 100).toFixed(1) + '% margin' : '—'}
           </div>
+        </div>
+        <div className="ch-kpi gold">
+          <div className="ch-kpi-label">Field Lease Revenue</div>
+          <div className="ch-kpi-value" style={{color:leaseRev>0?'var(--success)':'var(--muted)'}}>{inr(leaseRev)}</div>
+          <div className="ch-kpi-sub">{leases.length} lease{leases.length!==1?'s':''}</div>
         </div>
         <div className="ch-kpi earth">
           <div className="ch-kpi-label">Net Kg Sold</div>

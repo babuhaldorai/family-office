@@ -91,8 +91,8 @@ body {
   background: var(--surface);
 }
 
-.page-body { padding: 28px 32px; flex: 1; }
-.page-content-inner { padding: 0 32px 32px; }
+.page-body { padding: 28px 32px; flex: 1; overflow-x: hidden; }
+.page-content-inner { padding: 0 32px 32px; overflow-x: hidden; }
 .yoy-inner-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 10px; }
 .yoy-card-grid  { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 24px; }
 
@@ -237,7 +237,7 @@ body {
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* ── Table ── */
-.table-wrap { overflow-x: auto; }
+.table-wrap { overflow-x: auto; max-width: 100%; }
 table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
 thead tr { border-bottom: 1px solid var(--border2); }
 th {
@@ -414,8 +414,8 @@ textarea { resize: vertical; min-height: 80px; }
 
   /* ── Page padding fits screen ── */
   .page-header { padding: 12px 14px 10px 14px !important; }
-  .page-body { padding: 12px 12px 80px 12px !important; }
-  .page-content-inner { padding: 0 12px 80px 12px !important; }
+  .page-body { padding: 12px 12px 80px 12px !important; overflow-x: hidden !important; }
+  .page-content-inner { padding: 0 12px 80px 12px !important; overflow-x: hidden !important; }
 
   /* ── Cards never overflow ── */
   .card { padding: 14px !important; max-width: 100% !important; }
@@ -442,10 +442,9 @@ textarea { resize: vertical; min-height: 80px; }
   /* ── Layout ── */
   .main-content { margin-left: 0; padding-bottom: 68px; }
   .page-body    { padding: 14px 12px 80px; }
-  .page-content-inner { padding: 0 12px 80px; }
   .yoy-card-grid  { grid-template-columns: 1fr !important; }
   .yoy-inner-grid { grid-template-columns: 1fr 1fr 1fr !important; }
-  .page-header  { padding: 14px 50px 12px 50px; flex-wrap: wrap; gap: 8px; }
+  .page-header  { padding: 12px 14px 10px 14px !important; flex-wrap: wrap; gap: 8px; }
   .page-title   { font-size: 1.15rem; }
   .page-subtitle { font-size: 0.72rem; }
 
@@ -453,7 +452,8 @@ textarea { resize: vertical; min-height: 80px; }
   input, select, textarea { font-size: 16px !important; }
 
   /* ── KPI tiles ── */
-  .stat-grid { grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px !important; }
+  .stat-grid { grid-template-columns: 1fr 1fr !important; gap: 10px !important; margin-bottom: 16px !important; }
+  .stat-grid > * { min-width: 0; }
   .stat-card { padding: 12px 12px; border-radius: 12px; }
   .stat-value { font-size: 1.1rem; }
   .stat-label { font-size: 0.62rem; }
@@ -463,7 +463,7 @@ textarea { resize: vertical; min-height: 80px; }
   .card { padding: 14px; border-radius: 12px; }
 
   /* ── Tables ── */
-  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100vw; }
   table { min-width: 480px; font-size: 0.78rem; }
   th, td { padding: 8px 9px; white-space: nowrap; }
 
