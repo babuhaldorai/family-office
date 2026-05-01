@@ -42,17 +42,19 @@ export default function TeaPage() {
     switch(type) {
 
       case 'market_rate': {
-        // Cannot delete if any harvest uses this agent+date range
         const rate = record;
+        // Rate uses startDate/endDate (not fromDate/toDate)
+        const from = rate.startDate || rate.fromDate || '2000-01-01';
+        const to   = rate.endDate   || rate.toDate;
         const used = harvest.filter(h =>
-          h.agent === rate.agent &&
-          h.date  >= rate.fromDate &&
-          (!rate.toDate || h.date <= rate.toDate)
+          (h.agent === rate.agent || h.agentName === rate.agent) &&
+          h.date >= from &&
+          (!to || h.date <= to)
         );
         if (used.length > 0) {
-          alert(`❌ Cannot delete this rate — it is used by ${used.length} harvest session(s) for agent "${rate.agent}".
+          alert(`❌ Cannot delete this rate — it is used by ${used.length} harvest session(s) for agent "${rate.agent}" between ${from} and ${to||'now'}.
 
-Delete those harvest sessions first, or update the rate dates.`);
+Delete those harvest sessions first.`);
           return false;
         }
         return true;
@@ -207,7 +209,13 @@ Deleting it will allow transactions on this field again. Are you sure?`);
   );
 
   const saveHarvest = async () => {
-    if (!bags.length) return alert('Add at least one bag.');
+    if (!hDate)         return alert('❌ Please select a date.');
+    if (!hField)        return alert('❌ Please select a field.');
+    if (!hWorker)       return alert('❌ Please select a worker.');
+    if (!hAgent)        return alert('❌ Please select an agent.');
+    if (!bags.length)   return alert('❌ Add at least one bag.');
+    const totalGross = bags.reduce((s,b)=>s+(b.gross||0),0);
+    if (totalGross <= 0) return alert('❌ Total gross weight must be greater than 0.');
     const rateRec = getRateForAgentDate(rates, hAgent, hDate);
     if (!rateRec) { if (!window.confirm('No market rate found. Save with ₹0 agent revenue?')) return; }
     const rate       = rateRec ? rateRec.rate : 0;
@@ -255,6 +263,7 @@ Deleting it will allow transactions on this field again. Are you sure?`);
   }, [workerList, fieldList, agentList]);
 
   const saveEntity = async (form) => {
+    if (!form.name || !form.name.trim()) return alert(`❌ Please enter a name for this ${entityModal.type}.`);
     const { type, editing } = entityModal;
     const svc = type === 'worker' ? workersChaayaService : type === 'agent' ? agentsChaayaService : fieldsChaayaService;
     if (editing) { await svc.update(editing.id, form); writeAudit('update', type==='worker'?'workers':type==='agent'?'agents':'fields', `Updated ${type}: ${form.name||editing.id}`); }
@@ -272,6 +281,8 @@ Deleting it will allow transactions on this field again. Are you sure?`);
   };
 
   const saveWorkerSettlement = async (worker, amount, notes, isFloat) => {
+    if (!worker)           return alert('❌ Please select a worker.');
+    if (!amount || amount <= 0) return alert('❌ Please enter a valid amount.');
     const eligible = workerUnpaidWages(worker, harvest, advances, settlements);
     const min = eligible * 0.9, max = eligible * 1.1;
     if (amount < min || amount > max) {
@@ -284,6 +295,9 @@ Deleting it will allow transactions on this field again. Are you sure?`);
   };
 
   const saveAgentPayment = async (agent, amount, date, method, notes) => {
+    if (!agent)            return alert('❌ Please select an agent.');
+    if (!amount || amount <= 0) return alert('❌ Please enter a valid amount.');
+    if (!date)             return alert('❌ Please select a date.');
     if (!amount) return alert('Enter amount');
     await agentPaymentService.add({ agent, amount, date, method, notes });
     writeAudit('create','tea_agent_payments',`Agent payment: ${agent} ${amount} on ${date}`);
@@ -389,6 +403,11 @@ Deleting it will allow transactions on this field again. Are you sure?`);
             isAdmin={isAdmin} maintenance={maintenance}
             workerList={workerList} fieldList={fieldList}
             onSave={async data => {
+              if (!data.date)   return alert('❌ Please select a date.');
+              if (!data.field)  return alert('❌ Please select a field.');
+              if (!data.task)   return alert('❌ Please select a task.');
+              if (!data.worker) return alert('❌ Please select a worker.');
+              if (data.task !== 'Fertilizing' && (!data.rate || Number(data.rate) <= 0)) return alert('❌ Please enter a valid rate.');
               const mDate = data.date || today;
               const activeLease = getActiveLeaseForFieldDate(data.field, mDate);
               if(activeLease){alert(`❌ Cannot log maintenance on ${mDate} — ${data.field} is on lease from ${activeLease.startDate} to ${activeLease.endDate}.`);return;}
@@ -401,7 +420,11 @@ Deleting it will allow transactions on this field again. Are you sure?`);
         {tab === 'rates' && (
           <RatesTab
             isAdmin={isAdmin} rates={rates} agentList={agentList}
-            onSave={async data => { await ratesChaayaService.add(data); writeAudit('create','tea_market_rates',`Added rate: ${data.agent} ₹${data.rate}/kg from ${data.fromDate}`); }}
+            onSave={async data => {
+              if (!data.agent)    return alert('❌ Please select an agent.');
+              if (!data.rate || Number(data.rate) <= 0) return alert('❌ Please enter a valid rate.');
+              if (!data.fromDate) return alert('❌ Please enter a from date.');
+              await ratesChaayaService.add(data); writeAudit('create','tea_market_rates',`Added rate: ${data.agent} ₹${data.rate}/kg from ${data.fromDate}`); }}
             onDelete={async id => {
               const rate = rates.find(r => r.id === id);
               if (!rate) return;
@@ -409,7 +432,7 @@ Deleting it will allow transactions on this field again. Are you sure?`);
               if (!ok) return;
               if (!window.confirm(`Delete this rate for ${rate.agent}?`)) return;
               await ratesChaayaService.delete(id);
-              writeAudit('delete','tea_market_rates',`Deleted rate: ${rate.agent} from ${rate.fromDate}`);
+              writeAudit('delete','tea_market_rates',`Deleted rate: ${rate.agent} from ${rate.startDate||rate.fromDate}`);
             }}
           />
         )}
@@ -442,6 +465,12 @@ Deleting it will allow transactions on this field again. Are you sure?`);
             leases={leases}
             fieldList={fieldList}
             onSave={async (data, editId) => {
+              if (!data.field)     return alert('❌ Please select a field.');
+              if (!data.lessee)    return alert('❌ Please enter the lessee name.');
+              if (!data.startDate) return alert('❌ Please enter a start date.');
+              if (!data.endDate)   return alert('❌ Please enter an end date.');
+              if (!data.amount || Number(data.amount) <= 0) return alert('❌ Please enter a valid payment amount.');
+              if (data.startDate >= data.endDate) return alert('❌ End date must be after start date.');
               // Fix 6: Block if field has harvest/maintenance in the lease period
               if (!editId) {
                 
