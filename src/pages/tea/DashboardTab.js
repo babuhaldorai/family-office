@@ -42,10 +42,10 @@ export default function DashboardTab({ dashH, dashPeriod, setDashPeriod, allHarv
     .reduce((s, m) => s + (m.cost || 0), 0);
 
   const tExpenses    = tWages + tMaint;
-  // Unpaid wages uses ALL harvest (not period-filtered) vs ALL settlements
-  const allTimeWages = allHarvest.reduce((s,h) => s + (h.workerPay||0), 0);
-  const totalSettled = settlements.reduce((s,st) => s + (Number(st.netPaid)||0), 0);
-  const unpaidWages  = Math.max(0, allTimeWages - totalSettled);
+  // Unpaid = all-time wages minus all-time settlements (the real outstanding balance)
+  const allTimeWages   = allHarvest.reduce((s,h) => s + (h.workerPay||0), 0);
+  const allTimeSettled = settlements.reduce((s,st) => s + (Number(st.netPaid)||0), 0);
+  const unpaidWages    = Math.max(0, allTimeWages - allTimeSettled);
   const tNet      = tRev - tExpenses;
 
   // Expense breakdown by maintenance task
@@ -96,9 +96,11 @@ export default function DashboardTab({ dashH, dashPeriod, setDashPeriod, allHarv
           borderRadius:'var(--radius)',padding:'10px 14px',marginBottom:16,fontSize:'0.83rem'}}>
           <span style={{fontSize:16}}>⚠️</span>
           <div>
-            <strong style={{color:'var(--warn)'}}>Unpaid worker wages: {inr(unpaidWages)}</strong>
+            <strong style={{color:unpaidWages>0?'var(--warn)':'var(--success)'}}>
+              {unpaidWages > 0 ? `⚠ Unpaid: ${inr(unpaidWages)}` : '✓ All wages settled'}
+            </strong>
             <span style={{color:'var(--muted)',marginLeft:6,fontSize:'0.78rem'}}>
-              (Earned: {inr(tWages)} · Settled: {inr(totalSettled)})
+              Period earned: {inr(tWages)} · All-time earned: {inr(allTimeWages)} · All-time settled: {inr(allTimeSettled)}
             </span>
           </div>
         </div>
