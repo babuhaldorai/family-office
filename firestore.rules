@@ -18,16 +18,23 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'viewer'];
     }
 
-    // Users — anyone signed in can read their own doc (needed at login)
+    // Users
     match /users/{userId} {
       allow read:        if isSignedIn() && request.auth.uid == userId;
       allow read, write: if isAdmin();
     }
 
-    // Pending logins — any signed-in user writes their own, admin reads
+    // Pending logins
     match /pending_logins/{uid} {
       allow create, update: if isSignedIn() && request.auth.uid == uid;
       allow read, delete:   if isAdmin();
+    }
+
+    // Audit log — anyone signed in can write, only admin can read
+    match /audit_log/{id} {
+      allow read:   if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if false; // audit logs are immutable
     }
 
     // Tea Plantation
@@ -39,7 +46,6 @@ service cloud.firestore {
     match /tea_maintenance/{id}    { allow read: if isViewer(); allow write: if isAdmin(); }
     match /tea_weather/{id}        { allow read: if isViewer(); allow write: if isAdmin(); }
     match /tea_field_leases/{id}   { allow read: if isViewer(); allow write: if isAdmin(); }
-    match /audit_log/{id}          { allow read: if isAdmin(); allow create: if isSignedIn(); }
     match /workers/{id}            { allow read: if isViewer(); allow write: if isAdmin(); }
     match /agents/{id}             { allow read: if isViewer(); allow write: if isAdmin(); }
     match /fields/{id}             { allow read: if isViewer(); allow write: if isAdmin(); }
@@ -53,5 +59,10 @@ service cloud.firestore {
     // Home Maintenance
     match /home_properties/{id} { allow read: if isViewer(); allow write: if isAdmin(); }
     match /home_expenses/{id}   { allow read: if isViewer(); allow write: if isAdmin(); }
+
+    // Deny everything else by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
   }
 }
