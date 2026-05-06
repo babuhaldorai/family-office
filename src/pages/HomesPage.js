@@ -32,7 +32,15 @@ function PropertyModal({ open, onClose, onSave, initial }) {
   const [form, setForm]   = useState(empty);
   const [saving, setSaving] = useState(false);
   useEffect(() => { if (open) setForm(initial ? { ...empty, ...initial } : empty); }, [open]); // eslint-disable-line
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const set = (k, v) => setForm(f => {
+    const updated = { ...f, [k]: v };
+    // Auto-calc labour amount
+    if (['persons','ratePerPerson','days'].includes(k) && updated.costType === 'Labour') {
+      const amt = (Number(updated.persons)||0) * (Number(updated.ratePerPerson)||0) * (Number(updated.days)||1);
+      updated.amount = amt > 0 ? String(amt) : updated.amount;
+    }
+    return updated;
+  });
   const save = async () => {
     if (!form.name) return alert('Enter property name');
     setSaving(true);
@@ -50,11 +58,19 @@ function PropertyModal({ open, onClose, onSave, initial }) {
 
 // ── Expense modal ─────────────────────────────────────────────────────────────
 function ExpenseModal({ open, onClose, onSave, initial, properties }) {
-  const empty = { date: new Date().toISOString().slice(0,10), propertyId: '', category: HOME_CATEGORIES[0], amount: '', contractor: '', description: '' };
+  const empty = { date: new Date().toISOString().slice(0,10), propertyId: '', category: HOME_CATEGORIES[0], costType: 'Material', persons: '', ratePerPerson: '', days: '1', amount: '', contractor: '', description: '' };
   const [form, setForm]   = useState(empty);
   const [saving, setSaving] = useState(false);
   useEffect(() => { if (open) setForm(initial ? { ...empty, ...initial } : { ...empty, propertyId: properties[0]?.id || '' }); }, [open]); // eslint-disable-line
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const set = (k, v) => setForm(f => {
+    const updated = { ...f, [k]: v };
+    // Auto-calc labour amount
+    if (['persons','ratePerPerson','days'].includes(k) && updated.costType === 'Labour') {
+      const amt = (Number(updated.persons)||0) * (Number(updated.ratePerPerson)||0) * (Number(updated.days)||1);
+      updated.amount = amt > 0 ? String(amt) : updated.amount;
+    }
+    return updated;
+  });
   const save = async () => {
     if (!form.amount || !form.propertyId) return alert('Select a property and enter an amount');
     setSaving(true);
@@ -80,6 +96,48 @@ function ExpenseModal({ open, onClose, onSave, initial, properties }) {
         </div>
         <div className="form-group"><label>Amount (₹) *</label><input type="number" step="0.01" value={form.amount} onChange={e => set('amount', e.target.value)} /></div>
       </div>
+      <div className="form-group">
+        <label>Cost Type *</label>
+        <div style={{display:'flex',gap:8,marginTop:4}}>
+          {['Labour','Material'].map(t=>(
+            <button key={t} type="button" onClick={()=>set('costType',t)}
+              style={{flex:1,padding:'9px',borderRadius:8,cursor:'pointer',fontWeight:700,fontSize:'0.88rem',
+                border:`2px solid ${form.costType===t?'var(--accent)':'var(--border)'}`,
+                background:form.costType===t?'rgba(201,168,76,0.15)':'var(--surface2)',
+                color:form.costType===t?'var(--accent)':'var(--muted)'}}>
+              {t==='Labour'?'👷 Labour':'🧱 Material'}
+            </button>
+          ))}
+        </div>
+      </div>
+      {form.costType==='Labour' && (
+        <div style={{padding:'12px 14px',background:'var(--surface2)',borderRadius:8,border:'1px solid var(--border)',marginBottom:8}}>
+          <div style={{fontSize:'0.8rem',fontWeight:600,color:'var(--text)',marginBottom:10}}>👷 Labour Details</div>
+          <div className="form-row">
+            <div className="form-group">
+              <label># Persons</label>
+              <input type="number" min="1" value={form.persons} onChange={e=>set('persons',e.target.value)} placeholder="e.g. 3"/>
+            </div>
+            <div className="form-group">
+              <label>Rate / Person / Day (₹)</label>
+              <input type="number" step="0.01" value={form.ratePerPerson} onChange={e=>set('ratePerPerson',e.target.value)} placeholder="e.g. 500"/>
+            </div>
+            <div className="form-group">
+              <label>Days</label>
+              <input type="number" min="1" step="0.5" value={form.days} onChange={e=>set('days',e.target.value)} placeholder="1"/>
+            </div>
+          </div>
+          {form.persons && form.ratePerPerson && (
+            <div style={{fontSize:'0.82rem',color:'var(--muted)',marginTop:4}}>
+              {form.persons} persons × ₹{form.ratePerPerson}/day × {form.days||1} day(s) =
+              <strong style={{color:'var(--accent)',marginLeft:4}}>
+                ₹{((Number(form.persons)||0)*(Number(form.ratePerPerson)||0)*(Number(form.days)||1)).toFixed(0)}
+              </strong>
+              <span style={{fontSize:'0.75rem',color:'var(--muted)',marginLeft:6}}>(auto-filled in Amount below)</span>
+            </div>
+          )}
+        </div>
+      )}
       <div className="form-group"><label>Contractor / Vendor</label><input value={form.contractor} onChange={e => set('contractor', e.target.value)} placeholder="Who did the work" /></div>
       <div className="form-group"><label>Description</label><textarea value={form.description} onChange={e => set('description', e.target.value)} rows={2} /></div>
     </Modal>
@@ -111,6 +169,24 @@ export default function HomesPage() {
   const [catFilter, setCatFilter]   = useState('');
   const [propModal, setPropModal]   = useState({ open:false, initial:null });
   const [expModal,  setExpModal]    = useState({ open:false, initial:null });
+
+  // Inline quick-add expense form
+  const expEmpty = { date: new Date().toISOString().slice(0,10), propertyId: '', category: HOME_CATEGORIES[0], costType: 'Material', persons: '', ratePerPerson: '', days: '1', amount: '', contractor: '', description: '' };
+  const [expForm, setExpForm] = useState(expEmpty);
+  const setEF = (k, v) => setExpForm(f => {
+    const u = { ...f, [k]: v };
+    if (['persons','ratePerPerson','days'].includes(k) && u.costType === 'Labour') {
+      const amt = (Number(u.persons)||0) * (Number(u.ratePerPerson)||0) * (Number(u.days)||1);
+      if (amt > 0) u.amount = String(amt);
+    }
+    return u;
+  });
+  const saveExpInline = async () => {
+    if (!expForm.propertyId) return alert('Select a home.');
+    if (!expForm.amount || Number(expForm.amount) <= 0) return alert('Enter a valid amount.');
+    await handleSaveExp(expForm);
+    setExpForm({ ...expEmpty, propertyId: expForm.propertyId });
+  };
   const [loading, setLoading]       = useState(true);
 
   const load = async () => {
@@ -149,8 +225,12 @@ export default function HomesPage() {
   }, [periodExp, propFilter, catFilter]);
 
   const periodTotal = periodExp.reduce((s,e) => s+Number(e.amount||0), 0);
-  const filtTotal   = filteredExp.reduce((s,e) => s+Number(e.amount||0), 0);
-  const allTime     = expenses.reduce((s,e) => s+Number(e.amount||0), 0);
+  const filtTotal      = filteredExp.reduce((s,e) => s+Number(e.amount||0), 0);
+  const allTime        = expenses.reduce((s,e) => s+Number(e.amount||0), 0);
+  const labourEntries  = filteredExp.filter(e => e.costType === 'Labour');
+  const labourExp      = labourEntries.reduce((s,e) => s+Number(e.amount||0), 0);
+  const materialExp    = filteredExp.filter(e => e.costType !== 'Labour').reduce((s,e) => s+Number(e.amount||0), 0);
+  const totalPersonDays = labourEntries.reduce((s,e) => s+(Number(e.persons||0)*Number(e.days||1)), 0);
 
   // Per-property stats for selected period
   const propStats = useMemo(() => properties.map(p => {
@@ -285,23 +365,86 @@ export default function HomesPage() {
                 </div>
             }
 
-            {/* Category breakdown */}
+            {/* Category breakdown with Labour/Material split */}
             {catBreakdown.length > 0 && (
-              <div className="card">
+              <div className="card" style={{marginBottom:16}}>
                 <div className="section-title">By Category — {period.label}</div>
-                {catBreakdown.map(([cat,amt]) => (
-                  <div key={cat} style={{ marginBottom:12 }}>
-                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:'0.85rem', marginBottom:4 }}>
-                      <span style={{ fontWeight:500 }}>{cat}</span>
-                      <span style={{ color:'var(--danger)' }}>{fmt(amt)} <span style={{ color:'var(--muted)', fontWeight:400 }}>({periodTotal>0?((amt/periodTotal)*100).toFixed(1):0}%)</span></span>
+                {catBreakdown.map(([cat, amt]) => {
+                  const catExp    = filteredExp.filter(e => (e.category||'Other') === cat);
+                  const catLabourEntries = catExp.filter(e => e.costType==='Labour');
+                  const catLabour = catLabourEntries.reduce((s,e)=>s+Number(e.amount||0),0);
+                  const catMat    = catExp.filter(e => e.costType!=='Labour').reduce((s,e)=>s+Number(e.amount||0),0);
+                  const catPDs    = catLabourEntries.reduce((s,e)=>s+(Number(e.persons||0)*Number(e.days||1)),0);
+                  const avgRate   = catPDs > 0 ? catLabour / catPDs : 0;
+                  return (
+                    <div key={cat} style={{marginBottom:16,paddingBottom:16,borderBottom:'1px solid var(--border)'}}>
+                      {/* Category header */}
+                      <div style={{display:'flex',justifyContent:'space-between',fontSize:'0.88rem',marginBottom:6}}>
+                        <span style={{fontWeight:600}}>{cat}</span>
+                        <span style={{color:'var(--danger)',fontWeight:600}}>
+                          {fmt(amt)}
+                          <span style={{color:'var(--muted)',fontWeight:400,marginLeft:6}}>
+                            ({periodTotal>0?((amt/periodTotal)*100).toFixed(1):0}%)
+                          </span>
+                        </span>
+                      </div>
+                      {/* Progress bar */}
+                      <div style={{height:5,background:'var(--surface2)',borderRadius:3,overflow:'hidden',marginBottom:8}}>
+                        <div style={{height:'100%',width:`${periodTotal>0?(amt/periodTotal)*100:0}%`,background:'var(--warn)',borderRadius:3}}/>
+                      </div>
+                      {/* Labour / Material sub-breakdown */}
+                      {(catLabour > 0 || catMat > 0) && (
+                        <div style={{display:'flex',gap:8}}>
+                          {catLabour > 0 && (
+                            <div style={{flex:1,padding:'6px 10px',background:'rgba(94,136,200,0.08)',borderRadius:6,border:'1px solid rgba(94,136,200,0.2)'}}>
+                              <div style={{fontSize:'0.72rem',color:'#5e88c8',fontWeight:600,marginBottom:2}}>👷 Labour</div>
+                              <div style={{fontSize:'0.88rem',fontWeight:700,color:'var(--danger)'}}>{fmt(catLabour)}</div>
+                              {catPDs > 0 && <div style={{fontSize:'0.7rem',color:'var(--muted)',marginTop:2}}>{catPDs.toFixed(1)} person-days</div>}
+                              {avgRate > 0 && <div style={{fontSize:'0.7rem',color:'var(--muted)',marginTop:1}}>Avg ₹{avgRate.toFixed(0)}/person-day</div>}
+                            </div>
+                          )}
+                          {catMat > 0 && (
+                            <div style={{flex:1,padding:'6px 10px',background:'rgba(201,168,76,0.08)',borderRadius:6,border:'1px solid rgba(201,168,76,0.2)'}}>
+                              <div style={{fontSize:'0.72rem',color:'var(--accent)',fontWeight:600,marginBottom:2}}>🧱 Materials</div>
+                              <div style={{fontSize:'0.88rem',fontWeight:700,color:'var(--danger)'}}>{fmt(catMat)}</div>
+                              <div style={{fontSize:'0.7rem',color:'var(--muted)',marginTop:2}}>{catExp.filter(e=>e.costType!=='Labour').length} entries</div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <div style={{ height:5, background:'var(--surface2)', borderRadius:3, overflow:'hidden' }}>
-                      <div style={{ height:'100%', width:`${periodTotal>0?(amt/periodTotal)*100:0}%`, background:'var(--warn)', borderRadius:3 }} />
+                  );
+                })}
+                <div style={{display:'flex',justifyContent:'space-between',fontWeight:700,fontSize:'0.875rem',paddingTop:4}}>
+                  <span>Total</span><span style={{color:'var(--danger)'}}>{fmt(periodTotal)}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Labour vs Material summary tiles — bottom */}
+            {(labourExp>0||materialExp>0) && (
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:16}}>
+                <div className="card" style={{borderTop:'3px solid #5e88c8'}}>
+                  <div style={{fontWeight:700,fontSize:'0.85rem',color:'#5e88c8',marginBottom:8}}>👷 Labour Total</div>
+                  <div style={{fontSize:'1.3rem',fontWeight:700,color:'var(--danger)'}}>{fmt(labourExp)}</div>
+                  <div style={{fontSize:'0.75rem',color:'var(--muted)',marginTop:4}}>{labourEntries.length} entries · {totalPersonDays.toFixed(1)} person-days</div>
+                  {labourEntries.slice(0,3).map((e,i)=>(
+                    <div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:'0.74rem',marginTop:6,color:'var(--muted)'}}>
+                      <span>{e.date} · {e.persons||1}p × {e.days||1}d</span>
+                      <span style={{color:'var(--danger)'}}>{fmt(e.amount)}</span>
                     </div>
-                  </div>
-                ))}
-                <div style={{ borderTop:'1px solid var(--border)', paddingTop:10, marginTop:4, display:'flex', justifyContent:'space-between', fontWeight:700, fontSize:'0.875rem' }}>
-                  <span>Total</span><span style={{ color:'var(--danger)' }}>{fmt(periodTotal)}</span>
+                  ))}
+                </div>
+                <div className="card" style={{borderTop:'3px solid var(--accent)'}}>
+                  <div style={{fontWeight:700,fontSize:'0.85rem',color:'var(--accent)',marginBottom:8}}>🧱 Materials Total</div>
+                  <div style={{fontSize:'1.3rem',fontWeight:700,color:'var(--danger)'}}>{fmt(materialExp)}</div>
+                  <div style={{fontSize:'0.75rem',color:'var(--muted)',marginTop:4}}>{filteredExp.filter(e=>e.costType!=='Labour').length} entries</div>
+                  {filteredExp.filter(e=>e.costType!=='Labour').slice(0,3).map((e,i)=>(
+                    <div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:'0.74rem',marginTop:6,color:'var(--muted)'}}>
+                      <span>{e.date} · {e.category}</span>
+                      <span style={{color:'var(--danger)'}}>{fmt(e.amount)}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -352,7 +495,80 @@ export default function HomesPage() {
         {/* ══ EXPENSES ══ */}
         {tab==='expenses' && (
           <div>
-            {isAdmin && <div style={{ marginBottom:16 }}><button className="btn btn-primary" onClick={()=>setExpModal({open:true,initial:null})}><Plus size={14}/> Log Expense</button></div>}
+            {/* Inline quick-add form */}
+            <div className="card" style={{marginBottom:16}}>
+              <div style={{fontWeight:600,fontSize:'0.95rem',marginBottom:12}}>+ Log Expense</div>
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr 1fr',gap:10,marginBottom:10}}>
+                <div className="form-group" style={{margin:0}}>
+                  <label>Date</label>
+                  <input type="date" value={expForm.date} onChange={e=>setEF('date',e.target.value)}/>
+                </div>
+                <div className="form-group" style={{margin:0}}>
+                  <label>Home</label>
+                  <select value={expForm.propertyId} onChange={e=>setEF('propertyId',e.target.value)}>
+                    <option value="">Select…</option>
+                    {properties.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <div className="form-group" style={{margin:0}}>
+                  <label>Category</label>
+                  <select value={expForm.category} onChange={e=>setEF('category',e.target.value)}>
+                    {HOME_CATEGORIES.map(c=><option key={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div style={{marginBottom:10}}>
+                <div style={{display:'flex',gap:8,marginBottom:8}}>
+                  {['Labour','Material'].map(t=>(
+                    <button key={t} type="button" onClick={()=>setEF('costType',t)}
+                      style={{flex:1,padding:'7px',borderRadius:8,cursor:'pointer',fontWeight:700,fontSize:'0.82rem',
+                        border:`2px solid ${expForm.costType===t?'var(--accent)':'var(--border)'}`,
+                        background:expForm.costType===t?'rgba(201,168,76,0.15)':'var(--surface2)',
+                        color:expForm.costType===t?'var(--accent)':'var(--muted)'}}>
+                      {t==='Labour'?'👷 Labour':'🧱 Material'}
+                    </button>
+                  ))}
+                </div>
+                {expForm.costType==='Labour' && (
+                  <div style={{padding:'10px 12px',background:'var(--surface2)',borderRadius:8,border:'1px solid var(--border)',marginBottom:6}}>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10,marginBottom:6}}>
+                      <div className="form-group" style={{margin:0}}>
+                        <label># Persons</label>
+                        <input type="number" min="1" value={expForm.persons} onChange={e=>setEF('persons',e.target.value)} placeholder="e.g. 3"/>
+                      </div>
+                      <div className="form-group" style={{margin:0}}>
+                        <label>Rate / Person / Day (₹)</label>
+                        <input type="number" value={expForm.ratePerPerson} onChange={e=>setEF('ratePerPerson',e.target.value)} placeholder="e.g. 500"/>
+                      </div>
+                      <div className="form-group" style={{margin:0}}>
+                        <label>Days</label>
+                        <input type="number" min="0.5" step="0.5" value={expForm.days} onChange={e=>setEF('days',e.target.value)} placeholder="1"/>
+                      </div>
+                    </div>
+                    {expForm.persons && expForm.ratePerPerson && (
+                      <div style={{fontSize:'0.78rem',color:'var(--muted)'}}>
+                        {expForm.persons} × ₹{expForm.ratePerPerson}/day × {expForm.days||1}d =
+                        <strong style={{color:'var(--accent)',marginLeft:4}}>
+                          ₹{((Number(expForm.persons)||0)*(Number(expForm.ratePerPerson)||0)*(Number(expForm.days)||1)).toFixed(0)}
+                        </strong>
+                        <span style={{marginLeft:6,fontSize:'0.72rem'}}>(auto-fills Amount)</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'2fr 1fr',gap:10,marginBottom:10}}>
+                <div className="form-group" style={{margin:0}}>
+                  <label>Contractor / Notes (optional)</label>
+                  <input value={expForm.contractor} onChange={e=>setEF('contractor',e.target.value)} placeholder="Who did the work…"/>
+                </div>
+                <div className="form-group" style={{margin:0}}>
+                  <label>Amount (₹) *</label>
+                  <input type="number" step="0.01" min="0" value={expForm.amount} onChange={e=>setEF('amount',e.target.value)} placeholder="0"/>
+                </div>
+              </div>
+              <button className="btn btn-primary" onClick={saveExpInline}>💾 Save Expense</button>
+            </div>
 
             <PeriodBar period={period} onChange={setPeriod} />
 
@@ -380,14 +596,21 @@ export default function HomesPage() {
               <div className="table-wrap">
                 <table>
                   <thead>
-                    <tr><th>Date</th><th>Home</th><th>Category</th><th>Contractor</th><th>Description</th><th style={{ textAlign:'right' }}>Amount</th>{isAdmin&&<th></th>}</tr>
+                    <tr><th>Date</th><th>Home</th><th>Type</th><th>Category</th><th>Contractor</th><th>Description</th><th style={{ textAlign:'right' }}>Amount</th>{isAdmin&&<th></th>}</tr>
                   </thead>
                   <tbody>
-                    {filteredExp.length===0&&<tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--muted)' }}>No expenses for this period.</td></tr>}
+                    {filteredExp.length===0&&<tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--muted)' }}>No expenses for this period.</td></tr>}
                     {[...filteredExp].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(e=>(
                       <tr key={e.id}>
                         <td style={{ whiteSpace:'nowrap' }}>{e.date}</td>
                         <td style={{ fontWeight:500 }}>{propName(e.propertyId)}</td>
+                        <td>
+                          <span style={{padding:'2px 8px',borderRadius:4,fontSize:'0.72rem',fontWeight:600,
+                            background:e.costType==='Labour'?'rgba(94,136,200,0.15)':'rgba(201,168,76,0.15)',
+                            color:e.costType==='Labour'?'#5e88c8':'var(--accent)'}}>
+                            {e.costType==='Labour'?'👷 Labour':'🧱 Material'}
+                          </span>
+                        </td>
                         <td><span className="badge badge-vacant">{e.category}</span></td>
                         <td style={{ color:'var(--muted)', fontSize:'0.82rem' }}>{e.contractor||'—'}</td>
                         <td style={{ color:'var(--muted)', fontSize:'0.82rem', maxWidth:200, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{e.description||'—'}</td>
@@ -402,7 +625,7 @@ export default function HomesPage() {
                     ))}
                     {filteredExp.length>0&&(
                       <tr style={{ background:'var(--surface2)', fontWeight:700 }}>
-                        <td colSpan={5} style={{ textAlign:'right', color:'var(--muted)', fontSize:'0.78rem' }}>TOTAL</td>
+                        <td colSpan={6} style={{ textAlign:'right', color:'var(--muted)', fontSize:'0.78rem' }}>TOTAL</td>
                         <td className="amount-cell expense-text" style={{ textAlign:'right' }}>{fmt(filtTotal)}</td>
                         {isAdmin&&<td/>}
                       </tr>

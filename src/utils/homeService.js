@@ -16,7 +16,7 @@ const snap2arr = (s) => s.docs.map(d => ({ id: d.id, ...d.data() }));
 
 export const HOME_CATEGORIES = [
   'Renovation', 'Structural Repair', 'Plumbing', 'Electrical',
-  'Painting', 'Flooring', 'Roofing', 'Kitchen', 'Bathroom',
+  'Painting', 'Flooring', 'Roofing', 'Carpentry', 'Kitchen', 'Bathroom',
   'Furniture', 'Landscaping', 'Cleaning', 'Pest Control', 'Other',
 ];
 
@@ -39,10 +39,6 @@ export const homePropertyService = {
 
 // ── Expenses ─────────────────────────────────────────────────────────────────
 export const homeExpenseService = {
-  async getAll() {
-    const snap = await getDocs(col('home_expenses'));
-    return snap2arr(snap).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  },
   async getAll() {
     const snap = await getDocs(col('home_expenses'));
     return snap2arr(snap).sort((a, b) => (b.date || '').localeCompare(a.date || ''));

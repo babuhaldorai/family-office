@@ -110,11 +110,18 @@ const INCOME_CATS  = ['Rent','Security Deposit','Late Fee','Other'];
 const EXPENSE_CATS = ['Maintenance','Repair','Property Tax','Insurance','Water/Electricity','Management Fee','Legal','Other'];
 
 function TransactionModal({ open, onClose, onSave, initial, properties }) {
-  const empty = { date: new Date().toISOString().slice(0,10), type: 'income', category: '', amount: '', propertyId: '', description: '' };
+  const empty = { date: new Date().toISOString().slice(0,10), type: 'income', category: '', costType: 'Material', persons: '', ratePerPerson: '', days: '1', amount: '', propertyId: '', description: '' };
   const [form, setForm] = useState(empty);
   const [saving, setSaving] = useState(false);
   useEffect(() => { if (open) setForm(initial ? { ...empty, ...initial } : empty); }, [open]); // eslint-disable-line
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const set = (k, v) => setForm(f => {
+    const u = { ...f, [k]: v };
+    if (['persons','ratePerPerson','days'].includes(k) && u.costType==='Labour' && u.type==='expense') {
+      const amt = (Number(u.persons)||0) * (Number(u.ratePerPerson)||0) * (Number(u.days)||1);
+      if (amt > 0) u.amount = String(amt);
+    }
+    return u;
+  });
   const cats = form.type === 'income' ? INCOME_CATS : EXPENSE_CATS;
   const save = async () => {
     if (!form.amount || !form.category) return alert('Fill amount and category');
@@ -149,6 +156,47 @@ function TransactionModal({ open, onClose, onSave, initial, properties }) {
           {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
       </div>
+      {form.type==='expense' && (
+        <div className="form-group">
+          <label>Cost Type</label>
+          <div style={{display:'flex',gap:8,marginTop:4}}>
+            {['Labour','Material'].map(t=>(
+              <button key={t} type="button" onClick={()=>set('costType',t)}
+                style={{flex:1,padding:'9px',borderRadius:8,cursor:'pointer',fontWeight:700,fontSize:'0.88rem',
+                  border:`2px solid ${form.costType===t?'var(--accent)':'var(--border)'}`,
+                  background:form.costType===t?'rgba(201,168,76,0.15)':'var(--surface2)',
+                  color:form.costType===t?'var(--accent)':'var(--muted)'}}>
+                {t==='Labour'?'👷 Labour':'🧱 Material'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {form.type==='expense' && form.costType==='Labour' && (
+        <div style={{padding:'12px 14px',background:'var(--surface2)',borderRadius:8,border:'1px solid var(--border)',marginBottom:8}}>
+          <div style={{fontWeight:600,fontSize:'0.82rem',marginBottom:10}}>👷 Labour Details (auto-calculates amount)</div>
+          <div className="form-row">
+            <div className="form-group"><label># Persons</label>
+              <input type="number" min="1" value={form.persons} onChange={e=>set('persons',e.target.value)} placeholder="e.g. 3"/>
+            </div>
+            <div className="form-group"><label>Rate / Person / Day (₹)</label>
+              <input type="number" step="0.01" value={form.ratePerPerson} onChange={e=>set('ratePerPerson',e.target.value)} placeholder="e.g. 500"/>
+            </div>
+            <div className="form-group"><label>Days</label>
+              <input type="number" min="0.5" step="0.5" value={form.days} onChange={e=>set('days',e.target.value)} placeholder="1"/>
+            </div>
+          </div>
+          {form.persons && form.ratePerPerson && (
+            <div style={{fontSize:'0.8rem',color:'var(--muted)'}}>
+              {form.persons} × ₹{form.ratePerPerson}/day × {form.days||1}d =
+              <strong style={{color:'var(--accent)',marginLeft:4}}>
+                ₹{((Number(form.persons)||0)*(Number(form.ratePerPerson)||0)*(Number(form.days)||1)).toFixed(0)}
+              </strong>
+              <span style={{marginLeft:6,fontSize:'0.72rem'}}>(auto-filled in Amount)</span>
+            </div>
+          )}
+        </div>
+      )}
       <div className="form-group"><label>Description</label><textarea value={form.description} onChange={e => set('description', e.target.value)} rows={2} /></div>
     </Modal>
   );
@@ -183,6 +231,29 @@ export default function RentalsPage() {
   const [propModal,   setPropModal]   = useState({ open: false, initial: null });
   const [tenantModal, setTenantModal] = useState({ open: false, initial: null });
   const [txModal,     setTxModal]     = useState({ open: false, initial: null });
+
+  // Inline quick-add transaction form state
+  const txEmpty = { date: new Date().toISOString().slice(0,10), type: 'income', category: '', costType: 'Material', persons: '', ratePerPerson: '', days: '1', amount: '', propertyId: '', description: '' };
+  const [txForm, setTxForm] = useState(txEmpty);
+  const setTF = (k, v) => setTxForm(f => {
+    const u = { ...f, [k]: v };
+    if (['persons','ratePerPerson','days'].includes(k) && u.costType==='Labour' && u.type==='expense') {
+      const amt = (Number(u.persons)||0) * (Number(u.ratePerPerson)||0) * (Number(u.days)||1);
+      if (amt > 0) u.amount = String(amt);
+    }
+    return u;
+  });
+  const saveTxInline = async () => {
+    if (!txForm.date)     return alert('Select a date.');
+    if (!txForm.amount || Number(txForm.amount)<=0) return alert('Enter a valid amount.');
+    if (!txForm.category) return alert('Select a category.');
+    if (!txForm.propertyId) return alert('Select a property.');
+    await rentalService.add({ ...txForm, createdAt: serverTimestamp() });
+    const pn = properties.find(p=>p.id===txForm.propertyId)?.name||'';
+    writeAudit('create','rental_transactions',`Added ${txForm.type} ₹${txForm.amount} — ${pn}`);
+    setTxForm({ ...txEmpty, propertyId: txForm.propertyId });
+    load();
+  };
 
   const load = async () => {
     setLoading(true);
@@ -351,6 +422,41 @@ export default function RentalsPage() {
               </div>
             </div>
 
+            {/* Labour vs Material breakdown */}
+            {(() => {
+              const labour   = periodTx.filter(t=>t.type==='expense'&&t.costType==='Labour');
+              const material = periodTx.filter(t=>t.type==='expense'&&(t.costType==='Material'||!t.costType));
+              const labourAmt   = labour.reduce((s,t)=>s+Number(t.amount),0);
+              const materialAmt = material.reduce((s,t)=>s+Number(t.amount),0);
+              const personDays  = labour.reduce((s,t)=>s+(Number(t.persons||0)*Number(t.days||1)),0);
+              if (labourAmt===0 && materialAmt===0) return null;
+              return (
+                <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:16,marginBottom:24}}>
+                  <div className="card" style={{borderTop:'3px solid #5e88c8'}}>
+                    <div style={{fontWeight:700,fontSize:'0.85rem',color:'#5e88c8',marginBottom:8}}>👷 Labour Cost</div>
+                    <div style={{fontSize:'1.3rem',fontWeight:700,color:'var(--danger)'}}>{fmt(labourAmt)}</div>
+                    <div style={{fontSize:'0.75rem',color:'var(--muted)',marginTop:4}}>{labour.length} entries · {personDays.toFixed(1)} person-days</div>
+                    {labour.slice(0,3).map((e,i)=>(
+                      <div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:'0.74rem',marginTop:6,color:'var(--muted)'}}>
+                        <span>{e.date} · {e.persons||1}p × {e.days||1}d</span>
+                        <span style={{color:'var(--danger)'}}>{fmt(e.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="card" style={{borderTop:'3px solid var(--accent)'}}>
+                    <div style={{fontWeight:700,fontSize:'0.85rem',color:'var(--accent)',marginBottom:8}}>🧱 Material Cost</div>
+                    <div style={{fontSize:'1.3rem',fontWeight:700,color:'var(--danger)'}}>{fmt(materialAmt)}</div>
+                    <div style={{fontSize:'0.75rem',color:'var(--muted)',marginTop:4}}>{material.length} entries</div>
+                    {material.slice(0,3).map((e,i)=>(
+                      <div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:'0.74rem',marginTop:6,color:'var(--muted)'}}>
+                        <span>{e.date} · {e.category}</span>
+                        <span style={{color:'var(--danger)'}}>{fmt(e.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
             {/* Property cards */}
             {propStats.length===0
               ? <div className="empty-state"><p>No properties yet. Add one in the Properties tab.</p></div>
@@ -536,7 +642,94 @@ export default function RentalsPage() {
         {/* ══ TRANSACTIONS ══ */}
         {tab==='transactions' && (
           <div>
-            {isAdmin && <div style={{ marginBottom:16 }}><button className="btn btn-primary" onClick={()=>setTxModal({open:true,initial:null})}><Plus size={14}/> Add Transaction</button></div>}
+            {/* ── Inline quick-add form ── */}
+            <div className="card" style={{marginBottom:16}}>
+              <div style={{fontWeight:600,fontSize:'0.95rem',marginBottom:12}}>+ Log Transaction</div>
+              <div style={{display:'flex',gap:8,marginBottom:12}}>
+                {['income','expense'].map(t=>(
+                  <button key={t} type="button" onClick={()=>setTF('type',t)}
+                    style={{flex:1,padding:'8px',borderRadius:8,cursor:'pointer',fontWeight:700,fontSize:'0.85rem',
+                      border:`2px solid ${txForm.type===t?(t==='income'?'var(--success)':'var(--danger)'):'var(--border)'}`,
+                      background:txForm.type===t?(t==='income'?'rgba(76,175,128,0.12)':'rgba(184,74,46,0.12)'):'var(--surface2)',
+                      color:txForm.type===t?(t==='income'?'var(--success)':'var(--danger)'):'var(--muted)'}}>
+                    {t==='income'?'↑ Income':'↓ Expense'}
+                  </button>
+                ))}
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr 1fr',gap:10,marginBottom:10}}>
+                <div className="form-group" style={{margin:0}}>
+                  <label>Date</label>
+                  <input type="date" value={txForm.date} onChange={e=>setTF('date',e.target.value)}/>
+                </div>
+                <div className="form-group" style={{margin:0}}>
+                  <label>Property</label>
+                  <select value={txForm.propertyId} onChange={e=>setTF('propertyId',e.target.value)}>
+                    <option value="">Select…</option>
+                    {properties.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <div className="form-group" style={{margin:0}}>
+                  <label>Category</label>
+                  <select value={txForm.category} onChange={e=>setTF('category',e.target.value)}>
+                    <option value="">Select…</option>
+                    {(txForm.type==='income'?INCOME_CATS:EXPENSE_CATS).map(c=><option key={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+              {txForm.type==='expense' && (
+                <div style={{marginBottom:10}}>
+                  <div style={{display:'flex',gap:8,marginBottom:8}}>
+                    {['Labour','Material'].map(t=>(
+                      <button key={t} type="button" onClick={()=>setTF('costType',t)}
+                        style={{flex:1,padding:'7px',borderRadius:8,cursor:'pointer',fontWeight:700,fontSize:'0.82rem',
+                          border:`2px solid ${txForm.costType===t?'var(--accent)':'var(--border)'}`,
+                          background:txForm.costType===t?'rgba(201,168,76,0.15)':'var(--surface2)',
+                          color:txForm.costType===t?'var(--accent)':'var(--muted)'}}>
+                        {t==='Labour'?'👷 Labour':'🧱 Material'}
+                      </button>
+                    ))}
+                  </div>
+                  {txForm.costType==='Labour' && (
+                    <div style={{padding:'10px 12px',background:'var(--surface2)',borderRadius:8,border:'1px solid var(--border)',marginBottom:6}}>
+                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10,marginBottom:6}}>
+                        <div className="form-group" style={{margin:0}}>
+                          <label># Persons</label>
+                          <input type="number" min="1" value={txForm.persons} onChange={e=>setTF('persons',e.target.value)} placeholder="e.g. 3"/>
+                        </div>
+                        <div className="form-group" style={{margin:0}}>
+                          <label>Rate / Person / Day (₹)</label>
+                          <input type="number" value={txForm.ratePerPerson} onChange={e=>setTF('ratePerPerson',e.target.value)} placeholder="e.g. 500"/>
+                        </div>
+                        <div className="form-group" style={{margin:0}}>
+                          <label>Days</label>
+                          <input type="number" min="0.5" step="0.5" value={txForm.days} onChange={e=>setTF('days',e.target.value)} placeholder="1"/>
+                        </div>
+                      </div>
+                      {txForm.persons && txForm.ratePerPerson && (
+                        <div style={{fontSize:'0.78rem',color:'var(--muted)'}}>
+                          {txForm.persons} × ₹{txForm.ratePerPerson}/day × {txForm.days||1}d =
+                          <strong style={{color:'var(--accent)',marginLeft:4}}>
+                            ₹{((Number(txForm.persons)||0)*(Number(txForm.ratePerPerson)||0)*(Number(txForm.days)||1)).toFixed(0)}
+                          </strong>
+                          <span style={{marginLeft:6,fontSize:'0.72rem'}}>(auto-fills Amount)</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'2fr 1fr',gap:10,marginBottom:10}}>
+                <div className="form-group" style={{margin:0}}>
+                  <label>Description (optional)</label>
+                  <input value={txForm.description} onChange={e=>setTF('description',e.target.value)} placeholder="Notes…"/>
+                </div>
+                <div className="form-group" style={{margin:0}}>
+                  <label>Amount (₹) *</label>
+                  <input type="number" step="0.01" min="0" value={txForm.amount} onChange={e=>setTF('amount',e.target.value)} placeholder="0"/>
+                </div>
+              </div>
+              <button className="btn btn-primary" onClick={saveTxInline}>💾 Save Transaction</button>
+            </div>
             {/* ── Transactions filter ── */}
             <div style={{marginBottom:16}}>
               <PeriodBar period={txPeriod} onChange={setTxPeriod} />
@@ -572,7 +765,21 @@ export default function RentalsPage() {
                       return(
                         <tr key={t.id}>
                           <td style={{ whiteSpace:'nowrap' }}>{t.date}</td>
-                          <td><span className={`badge ${t.type==='income'?'badge-income':'badge-expense'}`}>{t.type==='income'?'↑ Income':'↓ Expense'}</span></td>
+                          <td>
+                            <span className={`badge ${t.type==='income'?'badge-income':'badge-expense'}`}>{t.type==='income'?'↑ Income':'↓ Expense'}</span>
+                            {t.type==='expense' && (
+                              <span style={{marginLeft:4,padding:'1px 6px',borderRadius:4,fontSize:'0.7rem',fontWeight:600,
+                                background:t.costType==='Labour'?'rgba(94,136,200,0.15)':'rgba(201,168,76,0.15)',
+                                color:t.costType==='Labour'?'#5e88c8':'var(--accent)'}}>
+                                {t.costType==='Labour'?'👷':'🧱'} {t.costType||'Material'}
+                              </span>
+                            )}
+                            {t.costType==='Labour' && t.persons && (
+                              <div style={{fontSize:'0.7rem',color:'var(--muted)',marginTop:2}}>
+                                {t.persons}p × ₹{t.ratePerPerson}/d × {t.days||1}d
+                              </div>
+                            )}
+                          </td>
                           <td>{t.category}</td>
                           <td style={{ fontSize:'0.82rem', color:'var(--muted)' }}>{propName}</td>
                           <td style={{ fontSize:'0.82rem', color:'var(--muted)', maxWidth:180, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{t.description||'—'}</td>
