@@ -224,13 +224,13 @@ Deleting it will allow transactions on this field again. Are you sure?`);
     // Deductions are stored as session totals on bag[0] only
     const tBagDed    = bags.length > 0 ? (bags[0].bagWt   || 0) : 0;
     const tWaterDed  = bags.length > 0 ? (bags[0].waterKg || 0) : 0;
-    const tNet       = Math.round(tGross - tBagDed - tWaterDed);
+    const tNet       = parseFloat((tGross - tBagDed - tWaterDed).toFixed(2));
     const avgWaterPct = tGross > 0 ? (tWaterDed / tGross * 100) : 0;
     const data = {
       date: hDate, worker: hWorker, field: hField, agent: hAgent,
       bags: bags.length, tGross, tBagDed, tWaterDed, tNet, avgWaterPct,
       bagDetails: bags.map(b => ({ ...b, waterPct: calcBagWaterPct(b) })),
-      workerPay: tNet * 6, agentRev: tNet * rate, rate, rateStatus,
+      workerPay: Math.round(tNet * 6), agentRev: parseFloat((tNet * rate).toFixed(1)), rate, rateStatus,
       weekStr: weekLabel(hDate), year: new Date(hDate).getFullYear(),
       month: new Date(hDate).getMonth() + 1,
     };

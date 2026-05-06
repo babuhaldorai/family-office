@@ -109,7 +109,7 @@ export default function HarvestTab({
                     {e.rateStatus==='placeholder'&&<span style={{background:'rgba(201,148,26,.15)',color:'var(--accent)',borderRadius:4,padding:'1px 5px',fontSize:10,marginLeft:4}}>⏳ est.</span>}
                     {e.rateStatus==='no-rate'&&<span style={{background:'rgba(184,74,46,.12)',color:'var(--danger)',borderRadius:4,padding:'1px 5px',fontSize:10,marginLeft:4}}>no rate</span>}
                   </td>
-                  <td style={{fontFamily:'var(--font-mono)'}}>{inr(e.agentRev||0)}</td>
+                  <td style={{fontFamily:'var(--font-mono)'}}>₹{(e.agentRev||0).toFixed(1)}</td>
                   {isAdmin&&(
                     <td>
                       <div style={{display:'flex',gap:5}}>
@@ -126,7 +126,7 @@ export default function HarvestTab({
                   <td>{filteredHarvest.reduce((s,e)=>s+(e.tNet||0),0).toFixed(2)} kg</td>
                   <td style={{color:'var(--success)'}}>{inr(filteredHarvest.reduce((s,e)=>s+(e.workerPay||0),0))}</td>
                   <td></td>
-                  <td style={{fontFamily:'var(--font-mono)'}}>{inr(filteredHarvest.reduce((s,e)=>s+(e.agentRev||0),0))}</td>
+                  <td style={{fontFamily:'var(--font-mono)'}}>₹{filteredHarvest.reduce((s,e)=>s+(e.agentRev||0),0).toFixed(1)}</td>
                   {isAdmin&&<td></td>}
                 </tr>
               )}
