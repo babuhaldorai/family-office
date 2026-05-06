@@ -3,7 +3,7 @@ import {
   harvestChaayaService, ratesChaayaService, settlementService,
   agentPaymentService, advanceService, maintenanceService, weatherService,
   workersChaayaService, agentsChaayaService, fieldsChaayaService,
-  calcBagNet, calcBagWaterPct, getRateForAgentDate,
+  calcBagWaterPct, getRateForAgentDate,
   periodBounds, getFilteredHarvest, weekLabel, todayStr, workerUnpaidWages,
 } from '../utils/chaayaService';
 import { useAuth } from '../context/AuthContext';
@@ -221,9 +221,10 @@ Deleting it will allow transactions on this field again. Are you sure?`);
     const rate       = rateRec ? rateRec.rate : 0;
     const rateStatus = !rateRec ? 'no-rate' : rateRec.isPlaceholder ? 'placeholder' : 'confirmed';
     const tGross     = bags.reduce((s, b) => s + (b.gross || 0), 0);
-    const tBagDed    = bags.reduce((s, b) => s + (b.bagWt  || 0), 0);
-    const tWaterDed  = bags.reduce((s, b) => s + (b.waterKg|| 0), 0);
-    const tNet       = bags.reduce((s, b) => s + calcBagNet(b), 0);
+    // Deductions are stored as session totals on bag[0] only
+    const tBagDed    = bags.length > 0 ? (bags[0].bagWt   || 0) : 0;
+    const tWaterDed  = bags.length > 0 ? (bags[0].waterKg || 0) : 0;
+    const tNet       = Math.round(tGross - tBagDed - tWaterDed);
     const avgWaterPct = tGross > 0 ? (tWaterDed / tGross * 100) : 0;
     const data = {
       date: hDate, worker: hWorker, field: hField, agent: hAgent,
@@ -423,7 +424,7 @@ Deleting it will allow transactions on this field again. Are you sure?`);
             onSave={async data => {
               if (!data.agent)    return alert('❌ Please select an agent.');
               if (!data.rate || Number(data.rate) <= 0) return alert('❌ Please enter a valid rate.');
-              if (!data.fromDate) return alert('❌ Please enter a from date.');
+              if (!data.startDate) return alert('❌ Please enter a from date.');
               await ratesChaayaService.add(data); writeAudit('create','tea_market_rates',`Added rate: ${data.agent} ₹${data.rate}/kg from ${data.fromDate}`); }}
             onDelete={async id => {
               const rate = rates.find(r => r.id === id);

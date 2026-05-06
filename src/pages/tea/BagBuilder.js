@@ -1,26 +1,36 @@
 import React from 'react';
-import {calcBagNet,calcBagWaterPct,getRateForAgentDate,inr} from '../../utils/chaayaService';
+import {getRateForAgentDate,inr} from '../../utils/chaayaService';
 
 const WORKER_RATE = 6;
 
 export default function BagBuilder({bags, onChange, agentName, dateStr, rates}) {
-  // Always total-session mode (per-bag disabled per requirement)
   const addBag    = () => onChange([...bags, {gross: 0, bagWt: 0, waterKg: 0}]);
   const removeBag = i  => onChange(bags.filter((_, idx) => idx !== i));
   const updateBag = (i, field, val) =>
     onChange(bags.map((b, idx) => idx === i ? {...b, [field]: parseFloat(val) || 0} : b));
 
-  const totals = bags.reduce((acc, b) => ({
-    gross: acc.gross + (b.gross  || 0),
-    bag:   acc.bag   + (b.bagWt  || 0),
-    water: acc.water + (b.waterKg|| 0),
-    net:   acc.net   + calcBagNet(b),
-  }), {gross: 0, bag: 0, water: 0, net: 0});
+  // Deductions are stored on bag[0] only — they are SESSION totals, not per-bag
+  const sessionBagDed   = bags.length > 0 ? (bags[0].bagWt   || 0) : 0;
+  const sessionWaterDed = bags.length > 0 ? (bags[0].waterKg || 0) : 0;
 
-  const rateRec = getRateForAgentDate(rates, agentName, dateStr);
-  const rate    = rateRec ? rateRec.rate : 0;
-  const workerPay = Math.round(totals.net * WORKER_RATE);
-  const agentRev  = Math.round(totals.net * rate);
+  const totalGross = bags.reduce((s, b) => s + (b.gross || 0), 0);
+  const totalNet   = Math.round(totalGross - sessionBagDed - sessionWaterDed);
+
+  const rateRec   = getRateForAgentDate(rates, agentName, dateStr);
+  const rate      = rateRec ? rateRec.rate : 0;
+  const workerPay = Math.round(totalNet * WORKER_RATE);
+  const agentRev  = Math.round(totalNet * rate);
+
+  const setBagDed = (val) => {
+    const total = parseFloat(val) || 0;
+    // Store entire deduction on bag[0], zero out rest
+    onChange(bags.map((b, i) => i === 0 ? {...b, bagWt: total} : {...b, bagWt: 0}));
+  };
+
+  const setWaterDed = (val) => {
+    const total = parseFloat(val) || 0;
+    onChange(bags.map((b, i) => i === 0 ? {...b, waterKg: total} : {...b, waterKg: 0}));
+  };
 
   return (
     <div>
@@ -33,7 +43,7 @@ export default function BagBuilder({bags, onChange, agentName, dateStr, rates}) 
         </span>
       </div>
 
-      {/* Bag list — per-bag fields disabled, totals only */}
+      {/* Bag list */}
       <div className="ch-bag-builder">
         <div className="ch-bag-header">
           <span style={{fontSize: 13, fontWeight: 500, color: 'var(--text)'}}>
@@ -46,8 +56,8 @@ export default function BagBuilder({bags, onChange, agentName, dateStr, rates}) 
         <div className="ch-bag-col-labels">
           <div>#</div>
           <div>Gross kg</div>
-          <div style={{opacity: 0.4}}>Bag wt (disabled)</div>
-          <div style={{opacity: 0.4}}>Water kg (disabled)</div>
+          <div style={{opacity: 0.4}}>Bag wt</div>
+          <div style={{opacity: 0.4}}>Water kg</div>
           <div>Net kg</div>
           <div></div>
         </div>
@@ -58,66 +68,64 @@ export default function BagBuilder({bags, onChange, agentName, dateStr, rates}) 
               Click "+ Add Bag" to start.
             </div>
           )}
-          {bags.map((b, i) => {
-            const net = calcBagNet(b);
-            return (
-              <div className="ch-bag-row" key={i}>
-                <div className="ch-bag-num">B{i + 1}</div>
-                <input className="ch-input" type="number" placeholder="0.0"
-                  value={b.gross || ''} min="0" step="0.1"
-                  onChange={e => updateBag(i, 'gross', e.target.value)}
-                  style={{padding: '6px 8px', fontFamily: 'var(--font-mono)', fontSize: 12.5}}/>
-                <input className="ch-input" type="number" placeholder="disabled"
-                  disabled style={{opacity: 0.25, cursor: 'not-allowed', padding: '6px 8px'}}/>
-                <input className="ch-input" type="number" placeholder="disabled"
-                  disabled style={{opacity: 0.25, cursor: 'not-allowed', padding: '6px 8px'}}/>
-                <div className="ch-bag-net">{net > 0 ? net.toFixed(2) : '-'}</div>
-                <button onClick={() => removeBag(i)}
-                  style={{background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 18, lineHeight: 1}}>×</button>
+          {bags.map((b, i) => (
+            <div className="ch-bag-row" key={i}>
+              <div className="ch-bag-num">B{i + 1}</div>
+              <input className="ch-input" type="number" placeholder="0.0"
+                value={b.gross || ''} min="0" step="0.1"
+                onChange={e => updateBag(i, 'gross', e.target.value)}
+                style={{padding: '6px 8px', fontFamily: 'var(--font-mono)', fontSize: 12.5}}/>
+              <input className="ch-input" type="number" placeholder="—"
+                disabled style={{opacity: 0.25, cursor: 'not-allowed', padding: '6px 8px'}}/>
+              <input className="ch-input" type="number" placeholder="—"
+                disabled style={{opacity: 0.25, cursor: 'not-allowed', padding: '6px 8px'}}/>
+              {/* Net shown only on last bag row as it applies to whole session */}
+              <div className="ch-bag-net" style={{color: i === bags.length - 1 ? 'var(--success)' : 'var(--muted)', fontSize: i === bags.length - 1 ? 13 : 11}}>
+                {i === bags.length - 1 ? (totalNet > 0 ? totalNet : '-') : (b.gross > 0 ? `${b.gross}` : '-')}
               </div>
-            );
-          })}
+              <button onClick={() => removeBag(i)}
+                style={{background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 18, lineHeight: 1}}>×</button>
+            </div>
+          ))}
         </div>
 
         {bags.length > 0 && (
           <>
-            {/* Total session deductions */}
+            {/* Session deductions */}
             <div style={{padding: '10px 14px', borderTop: '1px solid var(--border)', background: 'var(--surface2)'}}>
-              <div style={{fontWeight: 600, fontSize: '0.82rem', marginBottom: 8, color: 'var(--muted)'}}>Session Totals & Deductions</div>
+              <div style={{fontWeight: 600, fontSize: '0.82rem', marginBottom: 8, color: 'var(--muted)'}}>
+                Session Totals &amp; Deductions
+              </div>
               <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10}}>
                 <div>
                   <div style={{fontSize: '0.72rem', color: 'var(--muted)', marginBottom: 3}}>GROSS KG</div>
-                  <div style={{fontFamily: 'var(--font-mono)', fontWeight: 600}}>{totals.gross.toFixed(2)}</div>
+                  <div style={{fontFamily: 'var(--font-mono)', fontWeight: 600}}>{totalGross.toFixed(1)}</div>
                 </div>
                 <div>
-                  <div style={{fontSize: '0.72rem', color: 'var(--muted)', marginBottom: 3}}>BAG DEDUCTION (total)</div>
+                  <div style={{fontSize: '0.72rem', color: 'var(--muted)', marginBottom: 3}}>BAG DEDUCTION (session total)</div>
                   <input className="ch-input" type="number" placeholder="0.0" min="0" step="0.01"
-                    value={bags.length === 1 ? (bags[0].bagWt || '') : ''}
-                    onChange={e => {
-                      // Distribute total bag deduction across all bags equally
-                      const total = parseFloat(e.target.value) || 0;
-                      const each  = total / bags.length;
-                      onChange(bags.map(b => ({...b, bagWt: each})));
-                    }}
+                    value={sessionBagDed || ''}
+                    onChange={e => setBagDed(e.target.value)}
                     style={{padding: '4px 8px', fontFamily: 'var(--font-mono)', fontSize: 12}}/>
-                  <div style={{fontSize: '0.7rem', color: 'var(--danger)', marginTop: 2}}>−{totals.bag.toFixed(2)} kg</div>
+                  <div style={{fontSize: '0.7rem', color: 'var(--danger)', marginTop: 2}}>−{sessionBagDed} kg</div>
                 </div>
                 <div>
-                  <div style={{fontSize: '0.72rem', color: 'var(--muted)', marginBottom: 3}}>WATER DEDUCTION (total)</div>
+                  <div style={{fontSize: '0.72rem', color: 'var(--muted)', marginBottom: 3}}>WATER DEDUCTION (session total)</div>
                   <input className="ch-input" type="number" placeholder="0.0" min="0" step="0.01"
-                    value={bags.length === 1 ? (bags[0].waterKg || '') : ''}
-                    onChange={e => {
-                      const total = parseFloat(e.target.value) || 0;
-                      const each  = total / bags.length;
-                      onChange(bags.map(b => ({...b, waterKg: each})));
-                    }}
+                    value={sessionWaterDed || ''}
+                    onChange={e => setWaterDed(e.target.value)}
                     style={{padding: '4px 8px', fontFamily: 'var(--font-mono)', fontSize: 12}}/>
-                  <div style={{fontSize: '0.7rem', color: 'var(--danger)', marginTop: 2}}>−{totals.water.toFixed(2)} kg ({totals.gross > 0 ? ((totals.water / totals.gross) * 100).toFixed(1) : 0}%)</div>
+                  <div style={{fontSize: '0.7rem', color: 'var(--danger)', marginTop: 2}}>
+                    −{sessionWaterDed} kg ({totalGross > 0 ? ((sessionWaterDed / totalGross) * 100).toFixed(1) : 0}%)
+                  </div>
                 </div>
                 <div>
                   <div style={{fontSize: '0.72rem', color: 'var(--success)', marginBottom: 3}}>NET KG</div>
                   <div style={{fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '1.1rem', color: 'var(--success)'}}>
-                    {totals.net.toFixed(2)}
+                    {totalNet}
+                  </div>
+                  <div style={{fontSize: '0.7rem', color: 'var(--muted)', marginTop: 2}}>
+                    {totalGross} − {sessionBagDed} − {sessionWaterDed} = {totalNet}
                   </div>
                 </div>
               </div>
@@ -126,7 +134,7 @@ export default function BagBuilder({bags, onChange, agentName, dateStr, rates}) 
             {/* Revenue summary */}
             <div className="ch-bag-footer">
               <span style={{fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)'}}>
-                {bags.length} bags · Net: <strong style={{color: 'var(--text)'}}>{totals.net.toFixed(2)} kg</strong>
+                {bags.length} bags · Net: <strong style={{color: 'var(--text)'}}>{totalNet} kg</strong>
                 {' · '}Worker: <strong style={{color: 'var(--success)'}}>{inr(workerPay)}</strong>
                 {' · '}Agent rev: <strong style={{color: 'var(--success)'}}>{inr(agentRev)}</strong>
               </span>
