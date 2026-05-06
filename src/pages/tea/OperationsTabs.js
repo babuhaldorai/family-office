@@ -255,15 +255,32 @@ export function WeatherTab({isAdmin,weather,onSave,onDelete}){
 }
 
 // ── RATES TAB ─────────────────────────────────────────────────────────────────
-export function RatesTab({isAdmin,rates,agentList,onSave,onDelete}){
+export function RatesTab({isAdmin,rates,agentList,onSave,onUpdate,onDelete}){
   const agents=agentList;
-  const [form,setForm]=useState({agent:agents[0]||'',rate:'',startDate:todayStr(),endDate:'',notes:''});
+  const emptyForm = {agent:agents[0]||'',rate:'',startDate:todayStr(),endDate:'',notes:''};
+  const [form,setForm]=useState(emptyForm);
+  const [editId,setEditId]=useState(null); // null = adding new, id = editing existing
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const save=async()=>{
-    if(!form.rate)return alert('Enter a rate');
-    await onSave({agent:form.agent,rate:parseFloat(form.rate),startDate:form.startDate,endDate:form.endDate||null,notes:form.notes});
-    setForm(f=>({...f,rate:'',notes:''}));
+
+  const startEdit=(r)=>{
+    setEditId(r.id);
+    setForm({agent:r.agent,rate:String(r.rate),startDate:r.startDate||'',endDate:r.endDate||'',notes:r.notes||''});
   };
+  const cancelEdit=()=>{ setEditId(null); setForm(emptyForm); };
+
+  const save=async()=>{
+    if(!form.rate) return alert('Enter a rate');
+    if(!form.startDate) return alert('Enter a from date');
+    const data={agent:form.agent,rate:parseFloat(form.rate),startDate:form.startDate,endDate:form.endDate||null,notes:form.notes};
+    if(editId){
+      await onUpdate(editId,data);
+      setEditId(null);
+    } else {
+      await onSave(data);
+    }
+    setForm(emptyForm);
+  };
+
   const today=todayStr();
   const active=rates.filter(r=>r.startDate<=today&&(!r.endDate||r.endDate>=today));
   return(
@@ -271,7 +288,10 @@ export function RatesTab({isAdmin,rates,agentList,onSave,onDelete}){
       {isAdmin&&(
         <div className="ch-grid-2" style={{marginBottom:18}}>
           <div className="ch-card">
-            <div className="ch-card-title">Set New Rate</div>
+            <div className="ch-card-title" style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <span>{editId ? 'Edit Rate' : 'Set New Rate'}</span>
+              {editId && <button className="ch-btn ch-btn-ghost ch-btn-sm" onClick={cancelEdit}>Cancel</button>}
+            </div>
             <div className="ch-form-group"><label>Agent</label>
               <select className="ch-input" value={form.agent} onChange={e=>set('agent',e.target.value)}>
                 {agents.map(a=><option key={a}>{a}</option>)}
@@ -284,7 +304,9 @@ export function RatesTab({isAdmin,rates,agentList,onSave,onDelete}){
               <div className="ch-form-group"><label>From (Saturday)</label><input className="ch-input" type="date" value={form.startDate} onChange={e=>set('startDate',e.target.value)}/></div>
               <div className="ch-form-group"><label>To (Friday, optional)</label><input className="ch-input" type="date" value={form.endDate} onChange={e=>set('endDate',e.target.value)}/></div>
             </div>
-            <button className="ch-btn ch-btn-primary" style={{marginTop:12}} onClick={save}>Save Rate</button>
+            <button className="ch-btn ch-btn-primary" style={{marginTop:12}} onClick={save}>
+              {editId ? 'Update Rate' : 'Save Rate'}
+            </button>
           </div>
           <div className="ch-card">
             <div className="ch-card-title">Active Rates — Today</div>
@@ -305,12 +327,17 @@ export function RatesTab({isAdmin,rates,agentList,onSave,onDelete}){
           <tbody>
             {rates.length===0&&<tr><td colSpan={6} style={{textAlign:'center',padding:32,color:'var(--muted)'}}>No rates saved yet.</td></tr>}
             {rates.map(r=>(
-              <tr key={r.id}>
+              <tr key={r.id} style={{background:editId===r.id?'rgba(201,168,76,0.06)':''}}>
                 <td>{r.agent}</td>
                 <td style={{fontFamily:'var(--font-mono)',fontWeight:600}}>₹{r.rate}/kg</td>
                 <td>{r.startDate}</td><td>{r.endDate||'ongoing'}</td>
                 <td style={{color:'var(--muted)',fontSize:12}}>{r.notes||'—'}</td>
-                {isAdmin&&<td><button className="ch-btn ch-btn-danger ch-btn-sm" onClick={()=>onDelete(r.id)}>✕</button></td>}
+                {isAdmin&&<td>
+                  <div style={{display:'flex',gap:4}}>
+                    <button className="ch-btn ch-btn-edit ch-btn-sm" onClick={()=>startEdit(r)}>Edit</button>
+                    <button className="ch-btn ch-btn-danger ch-btn-sm" onClick={()=>onDelete(r.id)}>✕</button>
+                  </div>
+                </td>}
               </tr>
             ))}
           </tbody>

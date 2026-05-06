@@ -710,8 +710,8 @@ textarea { resize: vertical; min-height: 80px; }
 .ch-btn-secondary:hover { color: var(--text); background: var(--surface2); }
 .ch-btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
 .ch-btn-danger:hover { background: rgba(224,92,92,.1); }
-.ch-btn-edit { background: rgba(74,111,165,.15); color: var(--rental-light); border: none; }
-.ch-btn-edit:hover { background: rgba(74,111,165,.25); }
+.ch-btn-edit { background: transparent; color: var(--rental-light); border: 1px solid var(--rental-light); }
+.ch-btn-edit:hover { background: rgba(74,111,165,.15); }
 .ch-btn-sm  { padding:5px 10px; font-size:0.78rem; border-radius:6px; }
 .ch-btn-xs  { padding:2px 6px;  font-size:0.7rem;  border-radius:4px; }
 

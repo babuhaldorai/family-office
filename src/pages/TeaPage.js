@@ -7,7 +7,7 @@ import {
   periodBounds, getFilteredHarvest, weekLabel, todayStr, workerUnpaidWages,
 } from '../utils/chaayaService';
 import { useAuth } from '../context/AuthContext';
-import { getDocs, collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
+import {addDoc, collection, deleteDoc, doc, getDocs, serverTimestamp, updateDoc} from 'firebase/firestore';
 import { db } from '../firebase';
 import { TABS, currentWeekLabel } from './tea/chaayaStyles';
 import DashboardTab from './tea/DashboardTab';
@@ -425,7 +425,10 @@ Deleting it will allow transactions on this field again. Are you sure?`);
               if (!data.agent)    return alert('❌ Please select an agent.');
               if (!data.rate || Number(data.rate) <= 0) return alert('❌ Please enter a valid rate.');
               if (!data.startDate) return alert('❌ Please enter a from date.');
-              await ratesChaayaService.add(data); writeAudit('create','tea_market_rates',`Added rate: ${data.agent} ₹${data.rate}/kg from ${data.fromDate}`); }}
+              await ratesChaayaService.add(data); writeAudit('create','tea_market_rates',`Added rate: ${data.agent} ₹${data.rate}/kg from ${data.startDate}`); }}
+            onUpdate={async (id,data) => {
+              await updateDoc(doc(db, 'tea_market_rates', id), { ...data });
+              writeAudit('update','tea_market_rates',`Updated rate: ${data.agent} ₹${data.rate}/kg from ${data.startDate}`); }}
             onDelete={async id => {
               const rate = rates.find(r => r.id === id);
               if (!rate) return;
