@@ -5,7 +5,7 @@ import {C} from './chaayaStyles';
 
 export default function SettlementsTab({
   isAdmin,harvest,settlements,advances,agentPayments,workerList,
-  onWorkerPay,onAgentPay,onDeleteSettlement,onDeleteAgentPayment,
+  onWorkerPay,onAgentPay,onDeleteSettlement,onEditSettlement,onDeleteAgentPayment,onEditAgentPayment,
 }){
   const isMobile = useMobile();
   const [stab,setStab]=useState('workers');
@@ -105,7 +105,12 @@ export default function SettlementsTab({
                       <td>{s.date}</td><td>{s.worker}</td>
                       <td style={{color:'var(--success)'}}>{inr(s.netPaid)}</td>
                       <td style={{color:'var(--muted)',fontSize:12}}>{s.notes||'—'}</td>
-                      {isAdmin&&<td><button className="ch-btn ch-btn-danger ch-btn-xs" onClick={()=>onDeleteSettlement(s.id)}>✕</button></td>}
+                      {isAdmin&&<td>
+                        <div style={{display:'flex',gap:4}}>
+                          <button className="ch-btn ch-btn-edit ch-btn-xs" onClick={()=>onEditSettlement(s)}>Edit</button>
+                          <button className="ch-btn ch-btn-danger ch-btn-xs" onClick={()=>onDeleteSettlement(s.id)}>✕</button>
+                        </div>
+                      </td>}
                     </tr>
                   ))}
                 </tbody>
@@ -123,7 +128,7 @@ export default function SettlementsTab({
               <button key={k} className={`ch-tab ${settleView===k?'active':''}`} onClick={()=>setSettleView(k)}>{l}</button>
             ))}
           </div>
-          {settleView==='week'&&<AgentWeekView agentBreakdown={agentBreakdown} agentPayments={agentPayments} isAdmin={isAdmin} onDelete={onDeleteAgentPayment}/>}
+          {settleView==='week'&&<AgentWeekView agentBreakdown={agentBreakdown} agentPayments={agentPayments} isAdmin={isAdmin} onDelete={onDeleteAgentPayment} onEdit={onEditAgentPayment}/>}
           {settleView==='ytd'&&<AgentYTDView harvest={harvest} agentList={allAgents}/>}
           {settleView==='yoy'&&<AgentYOYView harvest={harvest} agentList={[...new Set(harvest.map(h=>h.agent).filter(Boolean))]}/>}
         </div>
@@ -132,7 +137,7 @@ export default function SettlementsTab({
   );
 }
 
-function AgentWeekView({agentBreakdown,agentPayments,isAdmin,onDelete}){
+function AgentWeekView({agentBreakdown,agentPayments,isAdmin,onDelete,onEdit}){
   return(
     <div>
       {agentBreakdown.map(x=>(
@@ -158,7 +163,12 @@ function AgentWeekView({agentBreakdown,agentPayments,isAdmin,onDelete}){
                   <td style={{color:'var(--success)'}}>{inr(p.amount)}</td>
                   <td><span className="ch-badge ch-badge-blue">{p.method||'Cash'}</span></td>
                   <td style={{color:'var(--muted)',fontSize:12}}>{p.notes||'—'}</td>
-                  {isAdmin&&<td><button className="ch-btn ch-btn-danger ch-btn-xs" onClick={()=>onDelete(p.id)}>✕</button></td>}
+                  {isAdmin&&<td>
+                    <div style={{display:'flex',gap:4}}>
+                      <button className="ch-btn ch-btn-edit ch-btn-xs" onClick={()=>onEdit(p)}>Edit</button>
+                      <button className="ch-btn ch-btn-danger ch-btn-xs" onClick={()=>onDelete(p.id)}>✕</button>
+                    </div>
+                  </td>}
                 </tr>
               ))}
             </tbody>

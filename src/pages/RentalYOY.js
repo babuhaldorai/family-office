@@ -1,7 +1,7 @@
 // RentalYOY.js — Year-over-Year comparison for Rental Homes
 import React, { useEffect, useState, useMemo } from 'react';
 import { db } from '../firebase';
-import { getDocs, query, collection, where } from 'firebase/firestore';
+import { getDocs, collection } from 'firebase/firestore';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, LineChart, Line } from 'recharts';
 
 const CUR   = new Date().getFullYear();
@@ -12,11 +12,10 @@ const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov
 function fmt(n) {  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n || 0);
 }
 
-async function loadRentalYear(year) {
+async function loadRentalYear(year, allTxs) {
   try {
-    // db and firestore imported statically at top
-    const snap = await getDocs(query(collection(db, 'rental_transactions'), where('year', '==', year)));
-    const txs  = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Filter from all transactions by date string year prefix — avoids missing 'year' field
+    const txs = allTxs.filter(t => (t.date || '').startsWith(String(year)));
 
     const income  = txs.filter(t => t.type === 'income').reduce((s, t)  => s + Number(t.amount), 0);
     const expense = txs.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
@@ -44,16 +43,25 @@ async function loadRentalYear(year) {
   }
 }
 
-export default function RentalYOY() {
+export default function RentalYOY({ allTxs: propTxs }) {
   const [data, setData]     = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
-    Promise.all(YEARS.map(loadRentalYear)).then(results => {
-      setData(results); setLoading(false);
-    });
-  }, []);
+    const run = async () => {
+      setLoading(true);
+      // Use passed-in txs if available, otherwise load all
+      let txs = propTxs;
+      if (!txs) {
+        const snap = await getDocs(collection(db, 'rental_transactions'));
+        txs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      }
+      const results = await Promise.all(YEARS.map(y => loadRentalYear(y, txs)));
+      setData(results);
+      setLoading(false);
+    };
+    run();
+  }, [propTxs]);
 
   const delta = (curr, prev) => {
     if (!prev || prev === 0) return null;

@@ -4,7 +4,7 @@ import {
   agentPaymentService, advanceService, maintenanceService, weatherService,
   workersChaayaService, agentsChaayaService, fieldsChaayaService,
   calcBagWaterPct, getRateForAgentDate,
-  periodBounds, getFilteredHarvest, weekLabel, todayStr, workerUnpaidWages,
+  periodBounds, getFilteredHarvest, weekLabel, todayStr,
 } from '../utils/chaayaService';
 import { useAuth } from '../context/AuthContext';
 import {addDoc, collection, deleteDoc, doc, getDocs, serverTimestamp, updateDoc} from 'firebase/firestore';
@@ -166,7 +166,9 @@ Deleting it will allow transactions on this field again. Are you sure?`);
 
   const [entityModal, setEntityModal]       = useState({ open: false, type: null, editing: null });
   const [workerSettleModal, setWorkerSettleModal] = useState({ open: false, worker: null, amount: 0, isFloat: false });
+  const [editSettlement, setEditSettlement] = useState(null);
   const [agentPayModal, setAgentPayModal]   = useState(false);
+  const [editAgentPayment, setEditAgentPayment] = useState(null);
 
   useEffect(() => {
     const subs = [
@@ -281,17 +283,12 @@ Deleting it will allow transactions on this field again. Are you sure?`);
     await svc.delete(id); writeAudit('delete', type==='worker'?'workers':type==='agent'?'agents':'fields', `Deleted ${type}: ${record?.name||id}`);
   };
 
-  const saveWorkerSettlement = async (worker, amount, notes, isFloat) => {
+  const saveWorkerSettlement = async (worker, amount, notes, isFloat, date) => {
     if (!worker)           return alert('❌ Please select a worker.');
     if (!amount || amount <= 0) return alert('❌ Please enter a valid amount.');
-    const eligible = workerUnpaidWages(worker, harvest, advances, settlements);
-    const min = eligible * 0.9, max = eligible * 1.1;
-    if (amount < min || amount > max) {
-      alert(`Amount outside ±10% range.\nEligible: ₹${eligible.toFixed(2)}\nAllowed: ₹${min.toFixed(2)} – ₹${max.toFixed(2)}`);
-      return;
-    }
-    await settlementService.add({ worker, netPaid: amount, date: todayStr(), notes, paidBeforeAgent: isFloat });
-    writeAudit('create','tea_settlements',`Settlement: ${worker} paid ${amount} on ${todayStr()}`);
+    const d = date || todayStr();
+    await settlementService.add({ worker, netPaid: amount, date: d, notes, paidBeforeAgent: isFloat });
+    writeAudit('create','tea_settlements',`Settlement: ${worker} paid ${amount} on ${d}`);
     setWorkerSettleModal({ open: false, worker: null, amount: 0, isFloat: false });
   };
 
@@ -386,8 +383,10 @@ Deleting it will allow transactions on this field again. Are you sure?`);
             isAdmin={isAdmin} harvest={harvest} settlements={settlements}
             advances={advances} agentPayments={agentPayments} workerList={workerList}
             onWorkerPay={(w, amt, isFloat) => setWorkerSettleModal({ open: true, worker: w, amount: amt, isFloat })}
+            onEditSettlement={s => { setEditSettlement(s); setWorkerSettleModal({ open: true, worker: s.worker, amount: s.netPaid, isFloat: false }); }}
             onAgentPay={() => setAgentPayModal(true)}
             onDeleteSettlement={async id => { if (window.confirm('Delete?')) { await settlementService.delete(id); writeAudit('delete','tea_settlements',`Deleted settlement ${id}`); } }}
+            onEditAgentPayment={p => { setEditAgentPayment(p); setAgentPayModal(true); }}
             onDeleteAgentPayment={async id => { if (window.confirm('Delete?')) { await agentPaymentService.delete(id); writeAudit('delete','tea_agent_payments',`Deleted agent payment ${id}`); } }}
           />
         )}
@@ -533,14 +532,22 @@ Deleting it will allow transactions on this field again. Are you sure?`);
       <WorkerSettleModal
         open={workerSettleModal.open} worker={workerSettleModal.worker}
         defaultAmount={workerSettleModal.amount} isFloat={workerSettleModal.isFloat}
+        editSettlement={editSettlement}
         harvest={harvest} settlements={settlements} advances={advances}
-        onClose={() => setWorkerSettleModal({ open: false, worker: null, amount: 0, isFloat: false })}
+        onClose={() => { setWorkerSettleModal({ open: false, worker: null, amount: 0, isFloat: false }); setEditSettlement(null); }}
+        onUpdate={async (id, data) => {
+          await updateDoc(doc(db, 'tea_settlements', id), data);
+          writeAudit('update','tea_settlements',`Updated settlement ${id}: ₹${data.netPaid}`);
+          setWorkerSettleModal({ open: false, worker: null, amount: 0, isFloat: false });
+          setEditSettlement(null);
+        }}
         onSave={saveWorkerSettlement}
       />
       <AgentPayModal
-        open={agentPayModal} agentList={agentList} harvest={harvest}
+        open={agentPayModal}
+        editPayment={editAgentPayment} agentList={agentList} harvest={harvest}
         agentPayments={agentPayments}
-        onClose={() => setAgentPayModal(false)}
+        onClose={() => { setAgentPayModal(false); setEditAgentPayment(null); }}
         onSave={saveAgentPayment}
       />
     </div>

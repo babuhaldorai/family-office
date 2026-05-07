@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import {inr} from '../../utils/chaayaService';
 
 import BagBuilder from './BagBuilder';
@@ -11,6 +11,25 @@ export default function HarvestTab({
   filteredHarvest,harvestFilter,setHarvestFilter,harvestWeeks,
   editHarvestEntry,deleteHarvestEntry,pendingRateSessions,
 }){
+  const [fField,  setFField]  = useState('all');
+  const [fAgent,  setFAgent]  = useState('all');
+  const [fWorker, setFWorker] = useState('all');
+  const [fFrom,   setFFrom]   = useState('');
+  const [fTo,     setFTo]     = useState('');
+
+  const displayed = useMemo(() => {
+    return [...filteredHarvest]
+      .filter(e => fField  === 'all' || e.field  === fField)
+      .filter(e => fAgent  === 'all' || e.agent  === fAgent)
+      .filter(e => fWorker === 'all' || e.worker === fWorker)
+      .filter(e => !fFrom  || (e.date||'') >= fFrom)
+      .filter(e => !fTo    || (e.date||'') <= fTo)
+      .sort((a,b) => (b.date||'').localeCompare(a.date||''));
+  }, [filteredHarvest, fField, fAgent, fWorker, fFrom, fTo]);
+
+  const clearFilters = () => { setFField('all'); setFAgent('all'); setFWorker('all'); setFFrom(''); setFTo(''); };
+  const hasFilter = fField!=='all'||fAgent!=='all'||fWorker!=='all'||fFrom||fTo;
+
   return(
     <div>
       {/* Pending rate banner — shown until all sessions have confirmed rates */}
@@ -69,14 +88,69 @@ export default function HarvestTab({
         </div>
       )}
 
+      {/* ── Harvest Log with filters ── */}
       <div className="ch-card" style={{padding:0}}>
-        <div style={{padding:'14px 20px 0',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}}>
-          <div style={{fontFamily:'var(--font-display)',fontSize:16,fontWeight:600,color:'var(--text)'}}>Harvest Log</div>
-          <select className="ch-input" style={{width:'auto',minWidth:200,maxWidth:360}} value={harvestFilter} onChange={e=>setHarvestFilter(e.target.value)}>
-            <option value="all">All Entries</option>
-            {harvestWeeks.map(w=>typeof w==='object'?<option key={w.value} value={w.value}>{w.label}</option>:<option key={w} value={w}>{w}</option>)}
-          </select>
+        {/* Filter bar */}
+        <div style={{padding:'14px 20px',borderBottom:'1px solid var(--border)',display:'flex',flexWrap:'wrap',gap:10,alignItems:'flex-end'}}>
+          <div style={{fontFamily:'var(--font-display)',fontSize:16,fontWeight:600,color:'var(--text)',marginRight:8,alignSelf:'center'}}>Harvest Log</div>
+
+          {/* Week filter */}
+          <div>
+            <div style={{fontSize:'0.72rem',color:'var(--muted)',marginBottom:3}}>WEEK</div>
+            <select className="ch-input" style={{minWidth:180}} value={harvestFilter} onChange={e=>setHarvestFilter(e.target.value)}>
+              <option value="all">All Weeks</option>
+              {harvestWeeks.map(w=>typeof w==='object'?<option key={w.value} value={w.value}>{w.label}</option>:<option key={w} value={w}>{w}</option>)}
+            </select>
+          </div>
+
+          {/* Field filter */}
+          <div>
+            <div style={{fontSize:'0.72rem',color:'var(--muted)',marginBottom:3}}>FIELD</div>
+            <select className="ch-input" style={{minWidth:130}} value={fField} onChange={e=>setFField(e.target.value)}>
+              <option value="all">All Fields</option>
+              {[...new Set(filteredHarvest.map(e=>e.field).filter(Boolean))].sort().map(f=><option key={f}>{f}</option>)}
+            </select>
+          </div>
+
+          {/* Agent filter */}
+          <div>
+            <div style={{fontSize:'0.72rem',color:'var(--muted)',marginBottom:3}}>AGENT</div>
+            <select className="ch-input" style={{minWidth:130}} value={fAgent} onChange={e=>setFAgent(e.target.value)}>
+              <option value="all">All Agents</option>
+              {[...new Set(filteredHarvest.map(e=>e.agent).filter(Boolean))].sort().map(a=><option key={a}>{a}</option>)}
+            </select>
+          </div>
+
+          {/* Worker filter */}
+          <div>
+            <div style={{fontSize:'0.72rem',color:'var(--muted)',marginBottom:3}}>WORKER</div>
+            <select className="ch-input" style={{minWidth:130}} value={fWorker} onChange={e=>setFWorker(e.target.value)}>
+              <option value="all">All Workers</option>
+              {[...new Set(filteredHarvest.map(e=>e.worker).filter(Boolean))].sort().map(w=><option key={w}>{w}</option>)}
+            </select>
+          </div>
+
+          {/* Date range */}
+          <div>
+            <div style={{fontSize:'0.72rem',color:'var(--muted)',marginBottom:3}}>FROM</div>
+            <input className="ch-input" type="date" value={fFrom} onChange={e=>setFFrom(e.target.value)} style={{minWidth:130}}/>
+          </div>
+          <div>
+            <div style={{fontSize:'0.72rem',color:'var(--muted)',marginBottom:3}}>TO</div>
+            <input className="ch-input" type="date" value={fTo} onChange={e=>setFTo(e.target.value)} style={{minWidth:130}}/>
+          </div>
+
+          {hasFilter && (
+            <button className="ch-btn ch-btn-ghost ch-btn-sm" onClick={clearFilters} style={{alignSelf:'flex-end'}}>
+              ✕ Clear
+            </button>
+          )}
+
+          <div style={{marginLeft:'auto',alignSelf:'center',fontSize:'0.8rem',color:'var(--muted)'}}>
+            {displayed.length} of {filteredHarvest.length} entries
+          </div>
         </div>
+
         <div style={{overflowX:'auto'}}>
           <table className="ch-table">
             <thead>
@@ -88,12 +162,12 @@ export default function HarvestTab({
               </tr>
             </thead>
             <tbody>
-              {filteredHarvest.length===0&&(
+              {displayed.length===0&&(
                 <tr><td colSpan={13} style={{textAlign:'center',padding:40,color:'var(--muted)'}}>
-                  No harvest sessions yet.
+                  No matching entries.
                 </td></tr>
               )}
-              {[...filteredHarvest].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(e=>(
+              {displayed.map(e=>(
                 <tr key={e.id}>
                   <td>{e.date}</td><td>{e.worker}</td>
                   <td><span className="ch-badge ch-badge-green">{e.field}</span></td>
@@ -120,13 +194,13 @@ export default function HarvestTab({
                   )}
                 </tr>
               ))}
-              {filteredHarvest.length>0&&(
+              {displayed.length>0&&(
                 <tr style={{background:'var(--surface2)',fontWeight:600}}>
                   <td colSpan={8} style={{textAlign:'right',color:'var(--muted)'}}>Totals</td>
-                  <td>{filteredHarvest.reduce((s,e)=>s+(e.tNet||0),0).toFixed(2)} kg</td>
-                  <td style={{color:'var(--success)'}}>{inr(filteredHarvest.reduce((s,e)=>s+(e.workerPay||0),0))}</td>
+                  <td>{displayed.reduce((s,e)=>s+(e.tNet||0),0).toFixed(2)} kg</td>
+                  <td style={{color:'var(--success)'}}>{inr(displayed.reduce((s,e)=>s+(e.workerPay||0),0))}</td>
                   <td></td>
-                  <td style={{fontFamily:'var(--font-mono)'}}>₹{filteredHarvest.reduce((s,e)=>s+(e.agentRev||0),0).toFixed(1)}</td>
+                  <td style={{fontFamily:'var(--font-mono)'}}>₹{displayed.reduce((s,e)=>s+(e.agentRev||0),0).toFixed(1)}</td>
                   {isAdmin&&<td></td>}
                 </tr>
               )}

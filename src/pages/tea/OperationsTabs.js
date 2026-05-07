@@ -83,7 +83,6 @@ export function MaintenanceTab({isAdmin,maintenance,workerList,fieldList,onSave,
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
   const save=async()=>{
     const rate=parseFloat(form.rate)||0,days=parseFloat(form.days)||1;
-    const d=form.date?new Date(form.date):new Date();
     let cost=rate*days;
     let fertData={};
     if(form.task==='Fertilizing'){
