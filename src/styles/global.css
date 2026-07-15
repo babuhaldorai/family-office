@@ -665,6 +665,78 @@ textarea { resize: vertical; min-height: 80px; }
 .ch-table tr:last-child td { border-bottom:none; }
 .ch-table tbody tr:hover td { background: var(--surface2); }
 
+/* Pin the actions column (Edit/Delete) to the right so it stays reachable
+   on wide tables that need horizontal scrolling — e.g. the Harvest Log. */
+.ch-sticky-actions-th, .ch-sticky-actions-td {
+  position: sticky;
+  right: 0;
+  background: var(--surface);
+  box-shadow: -6px 0 8px -6px rgba(0,0,0,0.15);
+  z-index: 1;
+}
+.ch-table tbody tr:hover .ch-sticky-actions-td { background: var(--surface2); }
+
+/* Harvest Log tables — every column shares one font size so nothing looks
+   misaligned column-to-column. */
+.ch-harvest-table, .ch-harvest-table th, .ch-harvest-table td {
+  font-size: 0.85rem;
+}
+.ch-harvest-table th, .ch-harvest-table td {
+  padding: 9px 12px;
+  white-space: nowrap;
+}
+.ch-harvest-table td { font-family: var(--font-mono); }
+
+/* Shared layout for the inline-editable Rate / Worker Payment / Agent
+   Payment cells — one row, consistent sizing, no wrapping. */
+.ch-inline-pay-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+.ch-inline-input {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+}
+.ch-inline-input-amt { width: 56px; text-align: right; }
+.ch-inline-input-date { width: 122px; color: var(--muted); }
+.ch-inline-tick {
+  font-size: 0.85rem;
+  line-height: 1;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--success);
+  cursor: pointer;
+  padding: 3px 7px;
+  flex-shrink: 0;
+}
+.ch-inline-tick:disabled { color: var(--muted); cursor: default; }
+.ch-inline-undo { color: var(--warn); }
+
+/* Rate & Payments tab — tighter than the Intake table, since every row has
+   several interactive input cells and needs to fit without zooming out. */
+.ch-ratepay-table, .ch-ratepay-table th, .ch-ratepay-table td {
+  font-size: 0.9rem;
+}
+.ch-ratepay-table th, .ch-ratepay-table td {
+  padding: 9px 11px;
+  white-space: nowrap;
+}
+.ch-ratepay-table td { font-family: var(--font-mono); }
+.ch-ratepay-table .ch-inline-pay-cell { font-size: 0.9rem; gap: 5px; }
+.ch-ratepay-table .ch-inline-input { font-size: 0.9rem; padding: 4px 7px; }
+.ch-ratepay-table .ch-inline-input-amt { width: 68px; }
+.ch-ratepay-table .ch-inline-input-date { width: 130px; }
+.ch-ratepay-table .ch-inline-tick { font-size: 0.78rem; padding: 4px 8px; white-space: nowrap; }
+
 /* Forms — match global inputs */
 .ch-form-group { display:flex; flex-direction:column; gap:5px; margin-bottom:16px; }
 .ch-form-group label { font-size:0.78rem; font-weight:500; color:var(--muted); }

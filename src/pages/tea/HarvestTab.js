@@ -1,6 +1,4 @@
 import React, { useState, useMemo } from 'react';
-import {inr} from '../../utils/chaayaService';
-
 import BagBuilder from './BagBuilder';
 
 export default function HarvestTab({
@@ -9,7 +7,7 @@ export default function HarvestTab({
   workerList,agentList,fieldList,rates,editingHarvestId,
   saveHarvest,savingHarvest,clearForm,
   filteredHarvest,harvestFilter,setHarvestFilter,harvestWeeks,
-  editHarvestEntry,deleteHarvestEntry,pendingRateSessions,
+  editHarvestEntry,deleteHarvestEntry,pendingRateSessions,onGoToRatePayments,
 }){
   const [fField,  setFField]  = useState('all');
   const [fAgent,  setFAgent]  = useState('all');
@@ -45,9 +43,18 @@ export default function HarvestTab({
           <div>
             <strong>{pendingRateSessions} session{pendingRateSessions!==1?'s':''} used an estimated rate.</strong>
             <div style={{marginTop:3,color:'var(--muted)',fontSize:'0.8rem',lineHeight:1.6}}>
-              Once the agent confirms the final rate, go to <strong style={{color:'var(--text)'}}>◇ Market Rates</strong> and
-              add the confirmed rate with the correct date range. Then edit each ⏳ session above and re-save —
-              revenue figures will update automatically. This banner clears when all sessions show a confirmed rate.
+              Once the agent confirms the final rate, go to{' '}
+              {onGoToRatePayments ? (
+                <button
+                  onClick={onGoToRatePayments}
+                  style={{background:'none',border:'none',padding:0,color:'var(--text)',fontWeight:600,textDecoration:'underline',cursor:'pointer',font:'inherit'}}
+                >
+                  Rate &amp; Payments
+                </button>
+              ) : (
+                <strong style={{color:'var(--text)'}}>Rate &amp; Payments</strong>
+              )}{' '}
+              and type it in — revenue and payment figures update automatically. This banner clears when all sessions show a confirmed rate.
             </div>
           </div>
         </div>
@@ -151,19 +158,20 @@ export default function HarvestTab({
           </div>
         </div>
 
+        {/* ── Section 1: Intake — what came in from the field ── */}
+        <div style={{padding:'16px 20px 4px',fontFamily:'var(--font-display)',fontSize:15,fontWeight:600,color:'var(--text)'}}>🌿 Intake</div>
         <div style={{overflowX:'auto'}}>
-          <table className="ch-table">
+          <table className="ch-table ch-harvest-table">
             <thead>
               <tr>
                 <th>Date</th><th>Worker</th><th>Field</th><th>Agent</th><th>Bags</th>
                 <th>Gross</th><th>Bag ded</th><th>Water ded</th><th>Net kg</th>
-                <th>Worker pay</th><th>Rate</th><th>Agent rev</th>
-                {isAdmin&&<th></th>}
+                {isAdmin&&<th className="ch-sticky-actions-th"></th>}
               </tr>
             </thead>
             <tbody>
               {displayed.length===0&&(
-                <tr><td colSpan={13} style={{textAlign:'center',padding:40,color:'var(--muted)'}}>
+                <tr><td colSpan={9+(isAdmin?1:0)} style={{textAlign:'center',padding:40,color:'var(--muted)'}}>
                   No matching entries.
                 </td></tr>
               )}
@@ -175,17 +183,10 @@ export default function HarvestTab({
                   <td><span className="ch-badge ch-badge-blue">{e.bags} bags</span></td>
                   <td>{(e.tGross||0).toFixed(1)}</td>
                   <td style={{color:'var(--accent)'}}>−{(e.tBagDed||0).toFixed(2)}</td>
-                  <td style={{color:'var(--danger)'}}>−{(e.tWaterDed||0).toFixed(2)} <span style={{fontSize:10,opacity:.6}}>({(e.avgWaterPct||0).toFixed(1)}%)</span></td>
+                  <td style={{color:'var(--danger)'}}>−{(e.tWaterDed||0).toFixed(2)} ({(e.avgWaterPct||0).toFixed(1)}%)</td>
                   <td style={{fontWeight:700}}>{(e.tNet||0).toFixed(2)}</td>
-                  <td style={{color:'var(--success)'}}>{inr(e.workerPay||0)}</td>
-                  <td style={{fontFamily:'var(--font-mono)',fontSize:12}}>
-                    ₹{e.rate||0}/kg
-                    {e.rateStatus==='placeholder'&&<span style={{background:'rgba(201,148,26,.15)',color:'var(--accent)',borderRadius:4,padding:'1px 5px',fontSize:10,marginLeft:4}}>⏳ est.</span>}
-                    {e.rateStatus==='no-rate'&&<span style={{background:'rgba(184,74,46,.12)',color:'var(--danger)',borderRadius:4,padding:'1px 5px',fontSize:10,marginLeft:4}}>no rate</span>}
-                  </td>
-                  <td style={{fontFamily:'var(--font-mono)'}}>₹{(e.agentRev||0).toFixed(1)}</td>
                   {isAdmin&&(
-                    <td>
+                    <td className="ch-sticky-actions-td">
                       <div style={{display:'flex',gap:5}}>
                         <button className="ch-btn ch-btn-edit ch-btn-sm" onClick={()=>editHarvestEntry(e)}>Edit</button>
                         <button className="ch-btn ch-btn-danger ch-btn-sm" onClick={()=>deleteHarvestEntry(e.id)}>✕</button>
@@ -198,10 +199,7 @@ export default function HarvestTab({
                 <tr style={{background:'var(--surface2)',fontWeight:600}}>
                   <td colSpan={8} style={{textAlign:'right',color:'var(--muted)'}}>Totals</td>
                   <td>{displayed.reduce((s,e)=>s+(e.tNet||0),0).toFixed(2)} kg</td>
-                  <td style={{color:'var(--success)'}}>{inr(displayed.reduce((s,e)=>s+(e.workerPay||0),0))}</td>
-                  <td></td>
-                  <td style={{fontFamily:'var(--font-mono)'}}>₹{displayed.reduce((s,e)=>s+(e.agentRev||0),0).toFixed(1)}</td>
-                  {isAdmin&&<td></td>}
+                  {isAdmin&&<td className="ch-sticky-actions-td"></td>}
                 </tr>
               )}
             </tbody>

@@ -3,7 +3,7 @@ import {getRateForAgentDate,inr} from '../../utils/chaayaService';
 
 const WORKER_RATE = 6;
 
-export default function BagBuilder({bags, onChange, agentName, dateStr, rates}) {
+export default function BagBuilder({bags, onChange, agentName, dateStr, rates, rateOverride, onRateOverrideChange}) {
   const inputRefs = useRef([]);
   const lastAddedRef = useRef(null);
 
@@ -49,7 +49,9 @@ export default function BagBuilder({bags, onChange, agentName, dateStr, rates}) 
   const totalNet   = parseFloat((totalGross - sessionBagDed - sessionWaterDed).toFixed(2));
 
   const rateRec   = getRateForAgentDate(rates, agentName, dateStr);
-  const rate      = rateRec ? rateRec.rate : 0;
+  const lookedUpRate = rateRec ? rateRec.rate : 0;
+  const hasOverride = rateOverride !== '' && rateOverride != null && !isNaN(parseFloat(rateOverride));
+  const rate      = hasOverride ? parseFloat(rateOverride) : lookedUpRate;
   const workerPay = Math.round(totalNet * WORKER_RATE);
   const agentRev  = parseFloat((totalNet * rate).toFixed(1));
 
@@ -65,13 +67,25 @@ export default function BagBuilder({bags, onChange, agentName, dateStr, rates}) 
 
   return (
     <div>
-      {/* Rate banner */}
-      <div className={`ch-rate-banner${!rateRec ? ' no-rate' : ''}`}>
-        <span style={{color: 'var(--muted)'}}>Active rate — {agentName || 'select agent'}</span>
-        <span style={{fontFamily: 'var(--font-mono)', fontWeight: 500, fontSize: 15,
-          color: rateRec ? 'var(--success)' : 'var(--danger)'}}>
-          {rateRec ? `₹${rate}/kg${rateRec.isPlaceholder ? ' ⏳ est.' : ''}` : 'No rate found — set one in Market Rates'}
-        </span>
+      {/* Rate — entered/confirmed directly here */}
+      <div className={`ch-rate-banner${!hasOverride && !rateRec ? ' no-rate' : ''}`} style={{alignItems:'center'}}>
+        <span style={{color: 'var(--muted)'}}>Rate (₹/kg) — {agentName || 'select agent'}</span>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <input
+            className="ch-input"
+            type="number" step="0.1" min="0"
+            value={rateOverride}
+            onChange={e => onRateOverrideChange && onRateOverrideChange(e.target.value)}
+            placeholder={rateRec ? String(lookedUpRate) : '0.0'}
+            style={{width:90,padding:'5px 8px',fontFamily:'var(--font-mono)',fontWeight:600,textAlign:'right'}}
+          />
+          {!hasOverride && rateRec && (
+            <span style={{fontSize:11,color:'var(--muted)'}}>using {rateRec.isPlaceholder?'⏳ estimated':'confirmed'} rate — type to override</span>
+          )}
+          {!hasOverride && !rateRec && (
+            <span style={{fontSize:11,color:'var(--danger)'}}>no rate on file — type one, or leave blank and fill it in later</span>
+          )}
+        </div>
       </div>
 
       {/* Bag list */}

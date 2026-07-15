@@ -245,26 +245,222 @@ export function agentStats(agent, harvestData) {
   };
 }
 
-export function workerUnpaidWages(workerName, harvest, advances, settlements) {
-  const totalEarned = harvest.filter(e => e.worker === workerName).reduce((s, e) => s + (e.workerPay || 0), 0);
+export function workerWageSummary(workerName, harvest, advances, settlements) {
+  const enriched = enrichHarvestWithPaymentStatus(harvest, settlements, []);
+  const rows = enriched.filter(e => e.worker === workerName);
+  const totalEarned = rows.reduce((s, e) => s + (e.workerPay || 0), 0);
+  const paid        = rows.reduce((s, e) => s + (e.workerPayAmount || 0), 0);
   const pendingAdv  = advances.filter(a => a.worker === workerName && !a.deducted).reduce((s, a) => s + (a.amount || 0), 0);
-  const paid        = settlements.filter(s => s.worker === workerName).reduce((s, x) => s + (x.netPaid || 0), 0);
-  return Math.max(0, totalEarned - pendingAdv - paid);
+  const outstanding = Math.max(0, totalEarned - pendingAdv - paid);
+  return { totalEarned, pendingAdv, paid, outstanding };
+}
+
+export function workerUnpaidWages(workerName, harvest, advances, settlements) {
+  return workerWageSummary(workerName, harvest, advances, settlements).outstanding;
 }
 
 export function agentPendingBreakdown(harvest, agentPayments) {
+  const enriched = enrichHarvestWithPaymentStatus(harvest, [], agentPayments);
   const harvestAgents  = [...new Set(harvest.map(h => h.agent).filter(Boolean))];
   const paymentAgents  = [...new Set(agentPayments.map(p => p.agent).filter(Boolean))];
   const allAgents = [...new Set([...harvestAgents, ...paymentAgents])];
   return allAgents.map(a => {
-    const hEntries = harvest.filter(e => e.agent === a);
+    const hEntries = enriched.filter(e => e.agent === a);
     const earned   = hEntries.reduce((s, e) => s + (e.agentRev || 0), 0);
     const totalKg  = hEntries.reduce((s, e) => s + (e.tNet || 0), 0);
     const sessions = hEntries.length;
-    const received = agentPayments.filter(p => p.agent === a).reduce((s, p) => s + (p.amount || 0), 0);
+    const received = hEntries.reduce((s, e) => s + (e.agentPayAmount || 0), 0);
     const avgRate  = totalKg > 0 ? earned / totalKg : 0;
     return { agent: a, earned, received, pending: Math.max(0, earned - received), totalKg, sessions, avgRate };
   }).filter(x => x.earned > 0 || x.received > 0);
+}
+
+// One row per (worker, date) — aggregates inline per-row payments recorded
+// directly in Harvest Log into a single transaction entry, since several
+// harvest sessions paid on the same day are really one payment event.
+export function workerPaymentLog(harvest) {
+  const map = {};
+  harvest.forEach(h => {
+    if (!h.worker || !(h.workerPayAmount > 0) || !h.workerPayDate) return;
+    const key = h.worker + '|' + h.workerPayDate;
+    if (!map[key]) map[key] = { worker: h.worker, date: h.workerPayDate, amount: 0, sessions: 0 };
+    map[key].amount += h.workerPayAmount;
+    map[key].sessions += 1;
+  });
+  return Object.values(map).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+}
+
+export function agentPaymentLog(harvest) {
+  const map = {};
+  harvest.forEach(h => {
+    if (!h.agent || !(h.agentPayAmount > 0) || !h.agentPayDate) return;
+    const key = h.agent + '|' + h.agentPayDate;
+    if (!map[key]) map[key] = { agent: h.agent, date: h.agentPayDate, amount: 0, sessions: 0 };
+    map[key].amount += h.agentPayAmount;
+    map[key].sessions += 1;
+  });
+  return Object.values(map).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+}
+
+// Applies `amount` toward a worker's pending (undeducted) advances, oldest
+// first. Fully-consumed advances are marked deducted; a partially-consumed
+// advance has its remaining amount reduced and stays pending.
+export async function consumeWorkerAdvance(advances, worker, amount) {
+  let remaining = amount;
+  const pending = advances
+    .filter(a => a.worker === worker && !a.deducted)
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  for (const a of pending) {
+    if (remaining <= 0.01) break;
+    if ((a.amount || 0) <= remaining + 0.01) {
+      await advanceService.update(a.id, { deducted: true });
+      remaining -= (a.amount || 0);
+    } else {
+      await advanceService.update(a.id, { amount: parseFloat(((a.amount || 0) - remaining).toFixed(2)) });
+      remaining = 0;
+    }
+  }
+}
+
+export function lastKnownRate(harvest, agent) {
+  if (!agent) return null;
+  const rows = harvest
+    .filter(h => h.agent === agent && h.rate > 0)
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  return rows.length ? rows[0].rate : null;
+}
+
+// Cost-per-kg breakdown: how much of the per-kg revenue is consumed by
+// bag/water deduction loss, worker wages, and field maintenance — both in
+// aggregate and broken down by individual maintenance task (fertilizer,
+// pruning, etc.) — leaving the actual net margin per kg harvested.
+export function costPerKgBreakdown(harvest, maintenance) {
+  const totalNetKg     = harvest.reduce((s,h)=>s+(h.tNet||0),0);
+  const totalGrossKg   = harvest.reduce((s,h)=>s+(h.tGross||0),0);
+  const totalBagDed    = harvest.reduce((s,h)=>s+(h.tBagDed||0),0);
+  const totalWaterDed  = harvest.reduce((s,h)=>s+(h.tWaterDed||0),0);
+  const totalDeductedKg = totalBagDed + totalWaterDed;
+  const totalAgentRev  = harvest.reduce((s,h)=>s+(h.agentRev||0),0);
+  const totalWorkerPay = harvest.reduce((s,h)=>s+(h.workerPay||0),0);
+  const avgRate = totalNetKg > 0 ? totalAgentRev / totalNetKg : 0;
+
+  // Value of the weight lost to bag/water deductions, at the average rate —
+  // revenue that was never counted because it was deducted before "net"
+  // weight was calculated, expressed per net kg actually sold.
+  const deductionLossValue = totalDeductedKg * avgRate;
+  const deductionLossPerKg = totalNetKg > 0 ? deductionLossValue / totalNetKg : 0;
+
+  const workerPerKg = totalNetKg > 0 ? totalWorkerPay / totalNetKg : 0;
+
+  const totalMaintenance = maintenance.reduce((s,m)=>s+(m.cost||0),0);
+  const maintenancePerKg = totalNetKg > 0 ? totalMaintenance / totalNetKg : 0;
+
+  const byTask = {};
+  maintenance.forEach(m => { const t = m.task || 'Other'; byTask[t] = (byTask[t]||0) + (m.cost||0); });
+  const taskBreakdown = Object.entries(byTask)
+    .map(([task,cost]) => ({ task, cost, perKg: totalNetKg > 0 ? cost/totalNetKg : 0 }))
+    .sort((a,b) => b.cost - a.cost);
+
+  const netMarginPerKg = avgRate - deductionLossPerKg - workerPerKg - maintenancePerKg;
+
+  return {
+    totalNetKg, totalGrossKg, totalDeductedKg, avgRate,
+    deductionLossValue, deductionLossPerKg,
+    totalWorkerPay, workerPerKg,
+    totalMaintenance, maintenancePerKg, taskBreakdown,
+    netMarginPerKg,
+  };
+}
+
+export function agentRateLog(harvest) {
+  const map = {};
+  harvest.forEach(h => {
+    if (!h.agent || !h.rate) return;
+    const key = h.agent + '|' + h.rate;
+    if (!map[key]) map[key] = { agent: h.agent, rate: h.rate, from: h.date, to: h.date, sessions: 0, netKg: 0, confirmed: h.rateStatus === 'confirmed' };
+    map[key].sessions += 1;
+    map[key].netKg += h.tNet || 0;
+    if (!map[key].from || h.date < map[key].from) map[key].from = h.date;
+    if (!map[key].to   || h.date > map[key].to)   map[key].to   = h.date;
+    if (h.rateStatus === 'confirmed') map[key].confirmed = true;
+  });
+  return Object.values(map).sort((a, b) => (b.to || '').localeCompare(a.to || ''));
+}
+
+// Payment status per harvest row (auto-derived, nothing extra to store) ──
+// Settlements/agent payments are recorded as lump sums (e.g. one payment
+// covering several harvest sessions). This allocates each lump payment
+// against the underlying sessions oldest-first (FIFO) so every harvest row
+// can show its own paid amount / status / the date it was covered.
+function fifoAllocate(rows, payments, rowAmountField, paymentAmountField, paymentDateField) {
+  const sortedRows = [...rows].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const sortedPayments = [...payments]
+    .filter(p => (p[paymentAmountField] || 0) > 0)
+    .sort((a, b) => (a[paymentDateField] || '').localeCompare(b[paymentDateField] || ''));
+
+  let payIdx = 0, remaining = 0, currentDate = null;
+  const result = {};
+  for (const row of sortedRows) {
+    let need = row[rowAmountField] || 0;
+    let paid = 0, lastDate = null;
+    while (need > 0.01) {
+      if (remaining <= 0.01) {
+        if (payIdx >= sortedPayments.length) break;
+        remaining = sortedPayments[payIdx][paymentAmountField] || 0;
+        currentDate = sortedPayments[payIdx][paymentDateField] || null;
+        payIdx++;
+      }
+      const take = Math.min(need, remaining);
+      paid += take; remaining -= take; need -= take;
+      lastDate = currentDate;
+    }
+    const total = row[rowAmountField] || 0;
+    const status = total <= 0 ? 'n/a' : paid >= total - 0.01 ? 'paid' : paid > 0 ? 'partial' : 'pending';
+    result[row.id] = { paidAmount: paid, status, date: lastDate };
+  }
+  return result;
+}
+
+// Groups rows/payments by a key (worker or agent name) before allocating,
+// so payments only settle sessions for the same person.
+function fifoAllocateGrouped(rows, payments, groupField, rowAmountField, paymentGroupField, paymentAmountField, paymentDateField) {
+  const groups = [...new Set(rows.map(r => r[groupField]).filter(Boolean))];
+  let out = {};
+  groups.forEach(g => {
+    const gRows = rows.filter(r => r[groupField] === g);
+    const gPayments = payments.filter(p => p[paymentGroupField] === g);
+    out = { ...out, ...fifoAllocate(gRows, gPayments, rowAmountField, paymentAmountField, paymentDateField) };
+  });
+  return out;
+}
+
+// Returns harvest array with workerPay*/agentPay* status fields merged in.
+// If a row has been edited directly (workerPayAmount / agentPayAmount set
+// explicitly, e.g. via the inline cell in Log Harvest), that value wins.
+// Otherwise it falls back to the FIFO allocation of lump-sum settlements /
+// agent payments, so bulk "pay the whole week at once" recording still works.
+export function enrichHarvestWithPaymentStatus(harvest, settlements, agentPayments) {
+  // Rows with an explicit inline override must NOT consume any of the legacy
+  // bulk-payment pool — otherwise that money gets "spent" on a row whose
+  // answer we discard anyway, leaving less for the rows that actually rely
+  // on FIFO allocation and throwing off everyone else's totals.
+  const workerFifoRows = harvest.filter(h => h.workerPayAmount == null);
+  const agentFifoRows  = harvest.filter(h => h.agentPayAmount  == null);
+  const workerAlloc = fifoAllocateGrouped(workerFifoRows, settlements, 'worker', 'workerPay', 'worker', 'netPaid', 'date');
+  const agentAlloc   = fifoAllocateGrouped(agentFifoRows, agentPayments, 'agent', 'agentRev', 'agent', 'amount', 'date');
+  return harvest.map(h => {
+    const hasOwnWorker = h.workerPayAmount != null;
+    const hasOwnAgent  = h.agentPayAmount  != null;
+    const wLegacy = workerAlloc[h.id] || {};
+    const aLegacy = agentAlloc[h.id]  || {};
+    const workerPayAmount = hasOwnWorker ? h.workerPayAmount : (wLegacy.paidAmount || 0);
+    const agentPayAmount  = hasOwnAgent  ? h.agentPayAmount  : (aLegacy.paidAmount || 0);
+    const workerPayDate   = hasOwnWorker ? (h.workerPayDate || null) : (wLegacy.date || null);
+    const agentPayDate    = hasOwnAgent  ? (h.agentPayDate  || null) : (aLegacy.date || null);
+    const workerPayStatus = !h.workerPay ? 'n/a' : workerPayAmount >= h.workerPay - 0.5 ? 'paid' : workerPayAmount > 0 ? 'partial' : 'pending';
+    const agentPayStatus  = !h.agentRev  ? 'n/a' : agentPayAmount  >= h.agentRev - 0.5  ? 'paid' : agentPayAmount  > 0 ? 'partial' : 'pending';
+    return { ...h, workerPayAmount, workerPayDate, workerPayStatus, agentPayAmount, agentPayDate, agentPayStatus };
+  });
 }
 
 // Tea Field Leases

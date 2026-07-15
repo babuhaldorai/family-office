@@ -3,7 +3,7 @@ import {
   harvestChaayaService, ratesChaayaService, settlementService,
   agentPaymentService, advanceService, maintenanceService, weatherService,
   workersChaayaService, agentsChaayaService, fieldsChaayaService,
-  calcBagWaterPct, getRateForAgentDate,
+  calcBagWaterPct, getRateForAgentDate, enrichHarvestWithPaymentStatus, lastKnownRate, consumeWorkerAdvance,
   periodBounds, getFilteredHarvest, weekLabel, todayStr,
 } from '../utils/chaayaService';
 import { useAuth } from '../context/AuthContext';
@@ -11,9 +11,8 @@ import {addDoc, collection, deleteDoc, doc, getDocs, serverTimestamp, updateDoc}
 import { db } from '../firebase';
 import { TABS, currentWeekLabel } from './tea/chaayaStyles';
 import DashboardTab from './tea/DashboardTab';
-import HarvestTab from './tea/HarvestTab';
-import SettlementsTab from './tea/SettlementsTab';
-import { AdvancesTab, MaintenanceTab, WeatherTab, RatesTab } from './tea/OperationsTabs';
+import HarvestHub from './tea/HarvestHub';
+import { AdvancesTab, MaintenanceTab, WeatherTab } from './tea/OperationsTabs';
 import { AnalyticsTab, AgentAnalyticsTab } from './tea/AnalyticsTabs';
 import PeopleTab, { EntityModal } from './tea/PeopleTab';
 import { WorkerSettleModal, AgentPayModal } from './tea/SettleModals';
@@ -119,6 +118,7 @@ Deleting it will allow transactions on this field again. Are you sure?`);
   };
 
   const [tab, setTab] = useState('dashboard');
+  const [harvestSubTab, setHarvestSubTab] = useState('log');
 
   const [harvest, setHarvest]         = useState([]);
   const [rates, setRates]             = useState([]);
@@ -167,7 +167,7 @@ Deleting it will allow transactions on this field again. Are you sure?`);
   const [entityModal, setEntityModal]       = useState({ open: false, type: null, editing: null });
   const [workerSettleModal, setWorkerSettleModal] = useState({ open: false, worker: null, amount: 0, isFloat: false });
   const [editSettlement, setEditSettlement] = useState(null);
-  const [agentPayModal, setAgentPayModal]   = useState(false);
+  const [agentPayModal, setAgentPayModal]   = useState({ open: false, agent: null });
   const [editAgentPayment, setEditAgentPayment] = useState(null);
 
   useEffect(() => {
@@ -219,9 +219,15 @@ Deleting it will allow transactions on this field again. Are you sure?`);
     const totalGross = bags.reduce((s,b)=>s+(b.gross||0),0);
     if (totalGross <= 0) return alert('❌ Total gross weight must be greater than 0.');
     const rateRec = getRateForAgentDate(rates, hAgent, hDate);
-    if (!rateRec) { if (!window.confirm('No market rate found. Save with ₹0 agent revenue?')) return; }
-    const rate       = rateRec ? rateRec.rate : 0;
-    const rateStatus = !rateRec ? 'no-rate' : rateRec.isPlaceholder ? 'placeholder' : 'confirmed';
+    let rate, rateStatus;
+    if (rateRec) {
+      rate = rateRec.rate;
+      rateStatus = rateRec.isPlaceholder ? 'placeholder' : 'confirmed';
+    } else {
+      const fallback = lastKnownRate(harvest, hAgent);
+      rate = fallback || 0;
+      rateStatus = fallback ? 'placeholder' : 'no-rate';
+    }
     const tGross     = bags.reduce((s, b) => s + (b.gross || 0), 0);
     // Deductions are stored as session totals on bag[0] only
     const tBagDed    = bags.length > 0 ? (bags[0].bagWt   || 0) : 0;
@@ -253,6 +259,115 @@ Deleting it will allow transactions on this field again. Are you sure?`);
     if (saved) writeAudit(auditAction,'tea_harvest',`${auditAction==='update'?'Updated':'Added'} harvest: ${data.field} on ${data.date}, net ${Number(data.tNet||0).toFixed(2)}kg`);
   };
 
+  // Reset all harvest rows behind one aggregated "Harvest Log" payment-log
+  // entry back to unpaid — same effect as the per-row Undo, just triggered
+  // from the Worker/Agent Payments log view for convenience.
+  const resetWorkerPaymentsForDate = async (worker, date) => {
+    const rows = harvest.filter(h => h.worker === worker && h.workerPayDate === date && h.workerPayAmount > 0);
+    if (!window.confirm(`Undo worker payment for ${worker} on ${date}? ${rows.length} session${rows.length!==1?'s':''} will show as unpaid again.`)) return;
+    try {
+      await Promise.all(rows.map(r => harvestChaayaService.update(r.id, { workerPayAmount: 0, workerPayDate: null })));
+      writeAudit('update', 'tea_harvest', `Reset worker payment for ${worker} on ${date} (${rows.length} session${rows.length!==1?'s':''})`);
+    } catch (e) { alert('Failed to reset: ' + e.message); }
+  };
+  const resetAgentPaymentsForDate = async (agent, date) => {
+    const rows = harvest.filter(h => h.agent === agent && h.agentPayDate === date && h.agentPayAmount > 0);
+    if (!window.confirm(`Undo agent payment for ${agent} on ${date}? ${rows.length} session${rows.length!==1?'s':''} will show as unpaid again.`)) return;
+    try {
+      await Promise.all(rows.map(r => harvestChaayaService.update(r.id, { agentPayAmount: 0, agentPayDate: null })));
+      writeAudit('update', 'tea_harvest', `Reset agent payment for ${agent} on ${date} (${rows.length} session${rows.length!==1?'s':''})`);
+    } catch (e) { alert('Failed to reset: ' + e.message); }
+  };
+  const deleteSettlementRecord = async (id) => {
+    if (!window.confirm('Delete this bulk payment record? The sessions it covered (that don\'t have their own inline payment) will show as unpaid again.')) return;
+    try { await settlementService.delete(id); writeAudit('delete', 'tea_settlements', `Deleted settlement ${id}`); }
+    catch (e) { alert('Failed to delete: ' + e.message); }
+  };
+  const deleteAgentPaymentRecord = async (id) => {
+    if (!window.confirm('Delete this bulk payment record? The sessions it covered (that don\'t have their own inline payment) will show as unpaid again.')) return;
+    try { await agentPaymentService.delete(id); writeAudit('delete', 'tea_agent_payments', `Deleted agent payment ${id}`); }
+    catch (e) { alert('Failed to delete: ' + e.message); }
+  };
+
+  const clearForm = () => { setBags([]); setEditingHarvestId(null); setHDate(todayStr()); };
+
+  // Inline rate edit from the Harvest Log table — recalculates agent revenue
+  // and rate status automatically, without touching the rest of the entry.
+  const updateHarvestRate = async (id, newRate) => {
+    const entry = harvest.find(h => h.id === id);
+    if (!entry) return;
+    const rate = Math.max(0, parseFloat(newRate) || 0);
+    const agentRev = parseFloat(((entry.tNet || 0) * rate).toFixed(1));
+    const rateStatus = rate > 0 ? 'confirmed' : 'no-rate';
+    try {
+      await harvestChaayaService.update(id, { rate, agentRev, rateStatus });
+      writeAudit('update', 'tea_harvest', `Updated rate for ${entry.agent} on ${entry.date} to ₹${rate}/kg`);
+    } catch (e) { alert('Failed to update rate: ' + e.message); }
+  };
+
+  // Inline worker/agent payment edit from the Harvest Log table — writes
+  // straight onto that harvest row (amount + date), independent of any
+  // lump-sum settlement recorded in the Worker/Agent Payments tabs.
+  const updateHarvestWorkerPay = async (id, amount, date) => {
+    const entry = harvest.find(h => h.id === id);
+    if (!entry) return;
+    const amt = Math.max(0, parseFloat(amount) || 0);
+    try {
+      await harvestChaayaService.update(id, { workerPayAmount: amt, workerPayDate: amt > 0 ? (date || todayStr()) : null });
+      writeAudit('update', 'tea_harvest', `Updated worker payment for ${entry.worker} on ${entry.date} to ₹${amt}`);
+    } catch (e) { alert('Failed to update worker payment: ' + e.message); }
+  };
+  const updateHarvestAgentPay = async (id, amount, date) => {
+    const entry = harvest.find(h => h.id === id);
+    if (!entry) return;
+    const amt = Math.max(0, parseFloat(amount) || 0);
+    try {
+      await harvestChaayaService.update(id, { agentPayAmount: amt, agentPayDate: amt > 0 ? (date || todayStr()) : null });
+      writeAudit('update', 'tea_harvest', `Updated agent payment for ${entry.agent} on ${entry.date} to ₹${amt}`);
+    } catch (e) { alert('Failed to update agent payment: ' + e.message); }
+  };
+
+  // Marks a harvest row's worker pay fully settled (workerPayAmount = full
+  // session earning, so the row shows Paid), and simultaneously nets that
+  // amount against the worker's pending advances — so what actually gets
+  // physically handed to the worker is the balance after the advance, while
+  // the row itself is correctly accounted as settled either way. Only
+  // advances borrowed on or before this session's date count — an advance
+  // taken later shouldn't retroactively reduce an earlier session's payout.
+  const payWorkerRowNetOfAdvance = async (id) => {
+    const entry = harvest.find(h => h.id === id);
+    if (!entry) return;
+    const sessionAmount = entry.workerPay || 0;
+    const pendingAdv = advances
+      .filter(a => a.worker === entry.worker && !a.deducted && (a.date || '') <= (entry.date || ''))
+      .reduce((s, a) => s + (a.amount || 0), 0);
+    const advanceApplied = Math.min(pendingAdv, sessionAmount);
+    const cash = parseFloat((sessionAmount - advanceApplied).toFixed(2));
+    const d = todayStr();
+    try {
+      await harvestChaayaService.update(id, { workerPayAmount: sessionAmount, workerPayDate: d });
+      if (advanceApplied > 0) await consumeWorkerAdvance(advances.filter(a => (a.date || '') <= (entry.date || '')), entry.worker, advanceApplied);
+      writeAudit('update', 'tea_harvest',
+        advanceApplied > 0
+          ? `Paid ${entry.worker} on ${entry.date}: ₹${cash} cash + ₹${advanceApplied} netted from advance`
+          : `Paid ${entry.worker} on ${entry.date}: ₹${cash} cash`);
+    } catch (e) { alert('Failed to record payment: ' + e.message); }
+  };
+
+  // Plain "mark paid" — pays the full session amount in cash, without
+  // netting any advance. Useful when you want to settle the advance
+  // separately (e.g. deduct it from a different session).
+  const payWorkerRowFull = async (id) => {
+    const entry = harvest.find(h => h.id === id);
+    if (!entry) return;
+    const sessionAmount = entry.workerPay || 0;
+    const d = todayStr();
+    try {
+      await harvestChaayaService.update(id, { workerPayAmount: sessionAmount, workerPayDate: d });
+      writeAudit('update', 'tea_harvest', `Paid ${entry.worker} on ${entry.date}: ₹${sessionAmount} cash (no advance netted)`);
+    } catch (e) { alert('Failed to record payment: ' + e.message); }
+  };
+
   const editHarvestEntry = useCallback((entry) => {
     setEditingHarvestId(entry.id);
     setHDate(entry.date || todayStr());
@@ -263,6 +378,7 @@ Deleting it will allow transactions on this field again. Are you sure?`);
       ? entry.bagDetails
       : [{ gross: entry.tGross || 0, bagWt: entry.tBagDed || 0, waterKg: entry.tWaterDed || 0 }]);
     setTab('harvest');
+    setHarvestSubTab('log');
   }, [workerList, fieldList, agentList]);
 
   const saveEntity = async (form) => {
@@ -299,7 +415,7 @@ Deleting it will allow transactions on this field again. Are you sure?`);
     if (!amount) return alert('Enter amount');
     await agentPaymentService.add({ agent, amount, date, method, notes });
     writeAudit('create','tea_agent_payments',`Agent payment: ${agent} ${amount} on ${date}`);
-    setAgentPayModal(false);
+    setAgentPayModal({ open: false, agent: null });
   };
 
   const dashH         = useMemo(() => getFilteredHarvest(harvest, dashPeriod),  [harvest, dashPeriod]);
@@ -321,7 +437,14 @@ Deleting it will allow transactions on this field again. Are you sure?`);
     });
     return result;
   }, [harvest]);
-  const filteredHarvest = useMemo(() => harvestFilter === 'all' ? harvest : harvest.filter(e => (e.weekStr || weekLabel(e.date)) === harvestFilter), [harvest, harvestFilter]);
+  const harvestWithPay = useMemo(
+    () => enrichHarvestWithPaymentStatus(harvest, settlements, agentPayments),
+    [harvest, settlements, agentPayments]
+  );
+  const filteredHarvestWithPay = useMemo(
+    () => harvestFilter === 'all' ? harvestWithPay : harvestWithPay.filter(e => (e.weekStr || weekLabel(e.date)) === harvestFilter),
+    [harvestWithPay, harvestFilter]
+  );
 
   return (
     <div className="ch-page">
@@ -331,7 +454,7 @@ Deleting it will allow transactions on this field again. Are you sure?`);
           <p className="page-subtitle">Week: {currentWeekLabel()} · {harvest.length} sessions total</p>
         </div>
         {isAdmin && (
-          <button className="ch-btn ch-btn-primary" onClick={() => setTab('harvest')}>+ Log Harvest</button>
+          <button className="ch-btn ch-btn-primary" onClick={() => { setTab('harvest'); setHarvestSubTab('log'); }}>+ Log Harvest</button>
         )}
       </div>
 
@@ -359,7 +482,8 @@ Deleting it will allow transactions on this field again. Are you sure?`);
           />
         )}
         {tab === 'harvest' && (
-          <HarvestTab
+          <HarvestHub
+            subTab={harvestSubTab} setSubTab={setHarvestSubTab}
             leasedFields={leasedFields}
             isAdmin={isAdmin} bags={bags} setBags={setBags}
             deductMode={deductMode} setDeductMode={setDeductMode}
@@ -370,24 +494,22 @@ Deleting it will allow transactions on this field again. Are you sure?`);
             workerList={workerList} agentList={agentList} fieldList={fieldList}
             rates={rates} editingHarvestId={editingHarvestId}
             saveHarvest={saveHarvest} savingHarvest={savingHarvest}
-            clearForm={() => { setBags([]); setEditingHarvestId(null); setHDate(todayStr()); }}
-            filteredHarvest={filteredHarvest} harvestFilter={harvestFilter}
+            clearForm={clearForm}
+            filteredHarvest={filteredHarvestWithPay} harvestFilter={harvestFilter}
             setHarvestFilter={setHarvestFilter} harvestWeeks={harvestWeeks}
             editHarvestEntry={editHarvestEntry}
             deleteHarvestEntry={async id => { if (window.confirm('Delete?')) { await harvestChaayaService.delete(id); writeAudit('delete','tea_harvest',`Deleted harvest ${id}`); } }}
             pendingRateSessions={pendingRateSessions}
-          />
-        )}
-        {tab === 'settlements' && (
-          <SettlementsTab
-            isAdmin={isAdmin} harvest={harvest} settlements={settlements}
-            advances={advances} agentPayments={agentPayments} workerList={workerList}
-            onWorkerPay={(w, amt, isFloat) => setWorkerSettleModal({ open: true, worker: w, amount: amt, isFloat })}
-            onEditSettlement={s => { setEditSettlement(s); setWorkerSettleModal({ open: true, worker: s.worker, amount: s.netPaid, isFloat: false }); }}
-            onAgentPay={() => setAgentPayModal(true)}
-            onDeleteSettlement={async id => { if (window.confirm('Delete?')) { await settlementService.delete(id); writeAudit('delete','tea_settlements',`Deleted settlement ${id}`); } }}
-            onEditAgentPayment={p => { setEditAgentPayment(p); setAgentPayModal(true); }}
-            onDeleteAgentPayment={async id => { if (window.confirm('Delete?')) { await agentPaymentService.delete(id); writeAudit('delete','tea_agent_payments',`Deleted agent payment ${id}`); } }}
+            onUpdateRate={updateHarvestRate}
+            onUpdateWorkerPay={updateHarvestWorkerPay}
+            onUpdateAgentPay={updateHarvestAgentPay}
+            onPayWorkerNetOfAdvance={payWorkerRowNetOfAdvance}
+            onPayWorkerFull={payWorkerRowFull}
+            harvest={harvest} settlements={settlements} advances={advances} agentPayments={agentPayments} maintenance={maintenance}
+            onDeleteSettlement={deleteSettlementRecord}
+            onDeleteAgentPayment={deleteAgentPaymentRecord}
+            onResetWorkerLog={resetWorkerPaymentsForDate}
+            onResetAgentLog={resetAgentPaymentsForDate}
           />
         )}
         {tab === 'advances' && (
@@ -415,28 +537,6 @@ Deleting it will allow transactions on this field again. Are you sure?`);
               writeAudit('create','tea_maintenance',`Added ${data.task} on ${data.field} - ${data.date}`);
             }}
             onDelete={id => { if (window.confirm('Delete?')) maintenanceService.delete(id).then(()=>writeAudit('delete','tea_maintenance',`Deleted maintenance record ${id}`)); }}
-          />
-        )}
-        {tab === 'rates' && (
-          <RatesTab
-            isAdmin={isAdmin} rates={rates} agentList={agentList}
-            onSave={async data => {
-              if (!data.agent)    return alert('❌ Please select an agent.');
-              if (!data.rate || Number(data.rate) <= 0) return alert('❌ Please enter a valid rate.');
-              if (!data.startDate) return alert('❌ Please enter a from date.');
-              await ratesChaayaService.add(data); writeAudit('create','tea_market_rates',`Added rate: ${data.agent} ₹${data.rate}/kg from ${data.startDate}`); }}
-            onUpdate={async (id,data) => {
-              await updateDoc(doc(db, 'tea_market_rates', id), { ...data });
-              writeAudit('update','tea_market_rates',`Updated rate: ${data.agent} ₹${data.rate}/kg from ${data.startDate}`); }}
-            onDelete={async id => {
-              const rate = rates.find(r => r.id === id);
-              if (!rate) return;
-              const ok = await checkBeforeDelete('market_rate', id, rate);
-              if (!ok) return;
-              if (!window.confirm(`Delete this rate for ${rate.agent}?`)) return;
-              await ratesChaayaService.delete(id);
-              writeAudit('delete','tea_market_rates',`Deleted rate: ${rate.agent} from ${rate.startDate||rate.fromDate}`);
-            }}
           />
         )}
         {tab === 'analytics' && (
@@ -544,10 +644,10 @@ Deleting it will allow transactions on this field again. Are you sure?`);
         onSave={saveWorkerSettlement}
       />
       <AgentPayModal
-        open={agentPayModal}
+        open={agentPayModal.open} defaultAgent={agentPayModal.agent}
         editPayment={editAgentPayment} agentList={agentList} harvest={harvest}
         agentPayments={agentPayments}
-        onClose={() => { setAgentPayModal(false); setEditAgentPayment(null); }}
+        onClose={() => { setAgentPayModal({ open: false, agent: null }); setEditAgentPayment(null); }}
         onSave={saveAgentPayment}
       />
     </div>

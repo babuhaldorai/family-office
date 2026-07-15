@@ -76,7 +76,7 @@ export function WorkerSettleModal({open,worker,defaultAmount,isFloat,harvest,set
   );
 }
 
-export function AgentPayModal({open,agentList,harvest,agentPayments,onClose,onSave,editPayment,onUpdate}){
+export function AgentPayModal({open,agentList,harvest,agentPayments,onClose,onSave,editPayment,onUpdate,defaultAgent}){
   const agents=agentList;
   const [agent,setAgent]=useState(agents[0]||'');
   const [amount,setAmount]=useState('');
@@ -93,10 +93,10 @@ export function AgentPayModal({open,agentList,harvest,agentPayments,onClose,onSa
         setMethod(editPayment.method||'Cash');
         setNotes(editPayment.notes||'');
       } else {
-        setAgent(agents[0]||'');setAmount('');setDate(todayStr());setMethod('Cash');setNotes('');
+        setAgent(defaultAgent||agents[0]||'');setAmount('');setDate(todayStr());setMethod('Cash');setNotes('');
       }
     }
-  },[open,editPayment]); // eslint-disable-line
+  },[open,editPayment,defaultAgent]); // eslint-disable-line
   const breakdown=agentPendingBreakdown(harvest,agentPayments);
   const bd=breakdown.find(x=>x.agent===agent);
   const save=async()=>{
