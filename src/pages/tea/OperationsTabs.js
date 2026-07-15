@@ -1,5 +1,6 @@
 import React,{useState} from 'react';
-import {inr,todayStr} from '../../utils/chaayaService';
+import {inr,todayStr,agentRateLog,costPerKgBreakdown,periodBounds,periodLabel,getFilteredHarvest} from '../../utils/chaayaService';
+import PeriodBar from './PeriodBar';
 
 
 const MAINT_TASKS=['Pruning','Cleaning','Weeding','Fertilizing','Pest Control','Irrigation','Harvesting Equipment','Other'];
@@ -254,89 +255,84 @@ export function WeatherTab({isAdmin,weather,onSave,onDelete}){
 }
 
 // ── RATES TAB ─────────────────────────────────────────────────────────────────
-export function RatesTab({isAdmin,rates,agentList,onSave,onUpdate,onDelete}){
-  const agents=agentList;
-  const emptyForm = {agent:agents[0]||'',rate:'',startDate:todayStr(),endDate:'',notes:''};
-  const [form,setForm]=useState(emptyForm);
-  const [editId,setEditId]=useState(null); // null = adding new, id = editing existing
-  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+export function RatesTab({harvest,maintenance=[]}){
+  const [period, setPeriod] = useState({ preset: 'all', ...periodBounds('all') });
+  const filteredHarvest = getFilteredHarvest(harvest, period);
+  const filteredMaintenance = maintenance.filter(m => m.date && m.date >= (period.from||'2000-01-01') && m.date <= (period.to||'2099-12-31'));
 
-  const startEdit=(r)=>{
-    setEditId(r.id);
-    setForm({agent:r.agent,rate:String(r.rate),startDate:r.startDate||'',endDate:r.endDate||'',notes:r.notes||''});
-  };
-  const cancelEdit=()=>{ setEditId(null); setForm(emptyForm); };
-
-  const save=async()=>{
-    if(!form.rate) return alert('Enter a rate');
-    if(!form.startDate) return alert('Enter a from date');
-    const data={agent:form.agent,rate:parseFloat(form.rate),startDate:form.startDate,endDate:form.endDate||null,notes:form.notes};
-    if(editId){
-      await onUpdate(editId,data);
-      setEditId(null);
-    } else {
-      await onSave(data);
-    }
-    setForm(emptyForm);
-  };
-
-  const today=todayStr();
-  const active=rates.filter(r=>r.startDate<=today&&(!r.endDate||r.endDate>=today));
+  const rows = agentRateLog(filteredHarvest);
+  const cpk = costPerKgBreakdown(filteredHarvest, filteredMaintenance);
+  const waterfall = [
+    ['Avg Rate (revenue)', cpk.avgRate, 'var(--success)', false],
+    ['− Bag/Water Deduction Loss', cpk.deductionLossPerKg, 'var(--danger)', true],
+    ['− Worker Payment', cpk.workerPerKg, 'var(--danger)', true],
+    ['− Field Maintenance', cpk.maintenancePerKg, 'var(--danger)', true],
+  ];
   return(
     <div>
-      {isAdmin&&(
-        <div className="ch-grid-2" style={{marginBottom:18}}>
-          <div className="ch-card">
-            <div className="ch-card-title" style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-              <span>{editId ? 'Edit Rate' : 'Set New Rate'}</span>
-              {editId && <button className="ch-btn ch-btn-ghost ch-btn-sm" onClick={cancelEdit}>Cancel</button>}
-            </div>
-            <div className="ch-form-group"><label>Agent</label>
-              <select className="ch-input" value={form.agent} onChange={e=>set('agent',e.target.value)}>
-                {agents.map(a=><option key={a}>{a}</option>)}
-              </select></div>
-            <div className="ch-grid-2">
-              <div className="ch-form-group"><label>Rate (₹/kg)</label><input className="ch-input" type="number" step="0.01" value={form.rate} onChange={e=>set('rate',e.target.value)} placeholder="e.g. 42.00"/></div>
-              <div className="ch-form-group"><label>Notes</label><input className="ch-input" value={form.notes} onChange={e=>set('notes',e.target.value)}/></div>
-            </div>
-            <div className="ch-grid-2">
-              <div className="ch-form-group"><label>From (Saturday)</label><input className="ch-input" type="date" value={form.startDate} onChange={e=>set('startDate',e.target.value)}/></div>
-              <div className="ch-form-group"><label>To (Friday, optional)</label><input className="ch-input" type="date" value={form.endDate} onChange={e=>set('endDate',e.target.value)}/></div>
-            </div>
-            <button className="ch-btn ch-btn-primary" style={{marginTop:12}} onClick={save}>
-              {editId ? 'Update Rate' : 'Save Rate'}
-            </button>
+      <div style={{marginBottom:16}}>
+        <PeriodBar period={period} onChange={setPeriod}/>
+      </div>
+
+      <div className="ch-alert-info" style={{marginBottom:16}}>
+        ℹ️ This is a read-only log. Rates are entered directly on each harvest row — open a session in{' '}
+        <strong>Log Harvest</strong> and edit its <strong>Rate</strong> field. This log updates automatically.
+      </div>
+
+      {cpk.totalNetKg>0 && (
+        <div className="ch-card" style={{marginBottom:16}}>
+          <div className="ch-card-title">Per-Kg Cost Breakdown</div>
+          <div style={{fontSize:12,color:'var(--muted)',marginBottom:12}}>
+            Based on {cpk.totalNetKg.toFixed(0)} kg net harvested ({periodLabel(period)}, all agents) at an average rate of ₹{cpk.avgRate.toFixed(2)}/kg.
           </div>
-          <div className="ch-card">
-            <div className="ch-card-title">Active Rates — Today</div>
-            {active.length===0?<div style={{color:'var(--muted)',fontSize:13}}>No active rates for today.</div>:
-              active.map(r=>(
-                <div key={r.id} style={{background:'rgba(61,107,61,.06)',border:'1px solid rgba(61,107,61,.15)',borderRadius:8,padding:'10px 13px',display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
-                  <div><div style={{fontWeight:500,color:'var(--text)'}}>{r.agent}</div><div style={{fontSize:11.5,color:'var(--muted)'}}>{r.startDate} → {r.endDate||'ongoing'}</div></div>
-                  <div style={{fontFamily:'var(--font-mono)',fontSize:17,fontWeight:500,color:'var(--success)'}}>₹{r.rate}/kg</div>
-                </div>
-              ))}
+          {waterfall.map(([label,val,color,isDeduction])=>(
+            <div key={label} className="ch-settle-row">
+              <span style={{color:'var(--muted)'}}>{label}</span>
+              <span style={{fontFamily:'var(--font-mono)',fontWeight:600,color}}>{isDeduction?'−':''}₹{val.toFixed(2)}/kg</span>
+            </div>
+          ))}
+          <div className="ch-total-row">
+            <span style={{fontSize:13,fontWeight:600,color:'var(--muted)'}}>Net Margin per kg</span>
+            <span style={{fontSize:17,fontWeight:700,color:cpk.netMarginPerKg>=0?'var(--success)':'var(--danger)'}}>₹{cpk.netMarginPerKg.toFixed(2)}/kg</span>
           </div>
         </div>
       )}
+
+      {cpk.taskBreakdown.length>0 && (
+        <div className="ch-card" style={{padding:0,marginBottom:16}}>
+          <div style={{padding:'14px 20px 0',fontFamily:'var(--font-display)',fontSize:16,fontWeight:600,color:'var(--text)'}}>Maintenance Cost by Task</div>
+          <div style={{padding:'4px 20px 0',fontSize:12,color:'var(--muted)'}}>Total maintenance: ₹{cpk.totalMaintenance.toFixed(0)} → ₹{cpk.maintenancePerKg.toFixed(2)}/kg overall</div>
+          <table className="ch-table">
+            <thead><tr><th>Task</th><th>Total Cost</th><th>₹/kg</th></tr></thead>
+            <tbody>
+              {cpk.taskBreakdown.map(t=>(
+                <tr key={t.task}>
+                  <td>{t.task}</td>
+                  <td style={{fontFamily:'var(--font-mono)'}}>₹{t.cost.toFixed(0)}</td>
+                  <td style={{fontFamily:'var(--font-mono)',fontWeight:600,color:'var(--danger)'}}>₹{t.perKg.toFixed(2)}/kg</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <div className="ch-card" style={{padding:0}}>
-        <div style={{padding:'14px 20px 0',fontFamily:'var(--font-display)',fontSize:16,fontWeight:600,color:'var(--text)'}}>Rate History</div>
+        <div style={{padding:'14px 20px 0',fontFamily:'var(--font-display)',fontSize:16,fontWeight:600,color:'var(--text)'}}>Rate History (from Harvest Log)</div>
         <table className="ch-table">
-          <thead><tr><th>Agent</th><th>Rate (₹/kg)</th><th>From</th><th>To</th><th>Notes</th>{isAdmin&&<th></th>}</tr></thead>
+          <thead><tr><th>Agent</th><th>Rate (₹/kg)</th><th>From</th><th>To</th><th>Sessions</th><th>Net kg</th><th>Status</th></tr></thead>
           <tbody>
-            {rates.length===0&&<tr><td colSpan={6} style={{textAlign:'center',padding:32,color:'var(--muted)'}}>No rates saved yet.</td></tr>}
-            {rates.map(r=>(
-              <tr key={r.id} style={{background:editId===r.id?'rgba(201,168,76,0.06)':''}}>
+            {rows.length===0&&<tr><td colSpan={7} style={{textAlign:'center',padding:32,color:'var(--muted)'}}>No rates recorded on any harvest session yet.</td></tr>}
+            {rows.map(r=>(
+              <tr key={r.agent+'|'+r.rate+'|'+r.from}>
                 <td>{r.agent}</td>
                 <td style={{fontFamily:'var(--font-mono)',fontWeight:600}}>₹{r.rate}/kg</td>
-                <td>{r.startDate}</td><td>{r.endDate||'ongoing'}</td>
-                <td style={{color:'var(--muted)',fontSize:12}}>{r.notes||'—'}</td>
-                {isAdmin&&<td>
-                  <div style={{display:'flex',gap:4}}>
-                    <button className="ch-btn ch-btn-edit ch-btn-sm" onClick={()=>startEdit(r)}>Edit</button>
-                    <button className="ch-btn ch-btn-danger ch-btn-sm" onClick={()=>onDelete(r.id)}>✕</button>
-                  </div>
-                </td>}
+                <td>{r.from}</td><td>{r.to}</td>
+                <td>{r.sessions}</td>
+                <td>{r.netKg.toFixed(1)}</td>
+                <td>{r.confirmed
+                  ? <span className="ch-badge ch-badge-green">Confirmed</span>
+                  : <span className="ch-badge ch-badge-gold" style={{opacity:.7}}>Estimated</span>}</td>
               </tr>
             ))}
           </tbody>

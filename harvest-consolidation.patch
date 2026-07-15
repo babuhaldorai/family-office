@@ -1,0 +1,1628 @@
+diff --git a/src/pages/TeaPage.js b/src/pages/TeaPage.js
+index 07ecc9c..9a00569 100644
+--- a/src/pages/TeaPage.js
++++ b/src/pages/TeaPage.js
+@@ -3,7 +3,7 @@ import {
+   harvestChaayaService, ratesChaayaService, settlementService,
+   agentPaymentService, advanceService, maintenanceService, weatherService,
+   workersChaayaService, agentsChaayaService, fieldsChaayaService,
+-  calcBagWaterPct, getRateForAgentDate,
++  calcBagWaterPct, getRateForAgentDate, enrichHarvestWithPaymentStatus, lastKnownRate, consumeWorkerAdvance,
+   periodBounds, getFilteredHarvest, weekLabel, todayStr,
+ } from '../utils/chaayaService';
+ import { useAuth } from '../context/AuthContext';
+@@ -11,9 +11,8 @@ import {addDoc, collection, deleteDoc, doc, getDocs, serverTimestamp, updateDoc}
+ import { db } from '../firebase';
+ import { TABS, currentWeekLabel } from './tea/chaayaStyles';
+ import DashboardTab from './tea/DashboardTab';
+-import HarvestTab from './tea/HarvestTab';
+-import SettlementsTab from './tea/SettlementsTab';
+-import { AdvancesTab, MaintenanceTab, WeatherTab, RatesTab } from './tea/OperationsTabs';
++import HarvestHub from './tea/HarvestHub';
++import { AdvancesTab, MaintenanceTab, WeatherTab } from './tea/OperationsTabs';
+ import { AnalyticsTab, AgentAnalyticsTab } from './tea/AnalyticsTabs';
+ import PeopleTab, { EntityModal } from './tea/PeopleTab';
+ import { WorkerSettleModal, AgentPayModal } from './tea/SettleModals';
+@@ -119,6 +118,7 @@ Deleting it will allow transactions on this field again. Are you sure?`);
+   };
+ 
+   const [tab, setTab] = useState('dashboard');
++  const [harvestSubTab, setHarvestSubTab] = useState('log');
+ 
+   const [harvest, setHarvest]         = useState([]);
+   const [rates, setRates]             = useState([]);
+@@ -167,7 +167,7 @@ Deleting it will allow transactions on this field again. Are you sure?`);
+   const [entityModal, setEntityModal]       = useState({ open: false, type: null, editing: null });
+   const [workerSettleModal, setWorkerSettleModal] = useState({ open: false, worker: null, amount: 0, isFloat: false });
+   const [editSettlement, setEditSettlement] = useState(null);
+-  const [agentPayModal, setAgentPayModal]   = useState(false);
++  const [agentPayModal, setAgentPayModal]   = useState({ open: false, agent: null });
+   const [editAgentPayment, setEditAgentPayment] = useState(null);
+ 
+   useEffect(() => {
+@@ -219,9 +219,15 @@ Deleting it will allow transactions on this field again. Are you sure?`);
+     const totalGross = bags.reduce((s,b)=>s+(b.gross||0),0);
+     if (totalGross <= 0) return alert('❌ Total gross weight must be greater than 0.');
+     const rateRec = getRateForAgentDate(rates, hAgent, hDate);
+-    if (!rateRec) { if (!window.confirm('No market rate found. Save with ₹0 agent revenue?')) return; }
+-    const rate       = rateRec ? rateRec.rate : 0;
+-    const rateStatus = !rateRec ? 'no-rate' : rateRec.isPlaceholder ? 'placeholder' : 'confirmed';
++    let rate, rateStatus;
++    if (rateRec) {
++      rate = rateRec.rate;
++      rateStatus = rateRec.isPlaceholder ? 'placeholder' : 'confirmed';
++    } else {
++      const fallback = lastKnownRate(harvest, hAgent);
++      rate = fallback || 0;
++      rateStatus = fallback ? 'placeholder' : 'no-rate';
++    }
+     const tGross     = bags.reduce((s, b) => s + (b.gross || 0), 0);
+     // Deductions are stored as session totals on bag[0] only
+     const tBagDed    = bags.length > 0 ? (bags[0].bagWt   || 0) : 0;
+@@ -253,6 +259,115 @@ Deleting it will allow transactions on this field again. Are you sure?`);
+     if (saved) writeAudit(auditAction,'tea_harvest',`${auditAction==='update'?'Updated':'Added'} harvest: ${data.field} on ${data.date}, net ${Number(data.tNet||0).toFixed(2)}kg`);
+   };
+ 
++  // Reset all harvest rows behind one aggregated "Harvest Log" payment-log
++  // entry back to unpaid — same effect as the per-row Undo, just triggered
++  // from the Worker/Agent Payments log view for convenience.
++  const resetWorkerPaymentsForDate = async (worker, date) => {
++    const rows = harvest.filter(h => h.worker === worker && h.workerPayDate === date && h.workerPayAmount > 0);
++    if (!window.confirm(`Undo worker payment for ${worker} on ${date}? ${rows.length} session${rows.length!==1?'s':''} will show as unpaid again.`)) return;
++    try {
++      await Promise.all(rows.map(r => harvestChaayaService.update(r.id, { workerPayAmount: 0, workerPayDate: null })));
++      writeAudit('update', 'tea_harvest', `Reset worker payment for ${worker} on ${date} (${rows.length} session${rows.length!==1?'s':''})`);
++    } catch (e) { alert('Failed to reset: ' + e.message); }
++  };
++  const resetAgentPaymentsForDate = async (agent, date) => {
++    const rows = harvest.filter(h => h.agent === agent && h.agentPayDate === date && h.agentPayAmount > 0);
++    if (!window.confirm(`Undo agent payment for ${agent} on ${date}? ${rows.length} session${rows.length!==1?'s':''} will show as unpaid again.`)) return;
++    try {
++      await Promise.all(rows.map(r => harvestChaayaService.update(r.id, { agentPayAmount: 0, agentPayDate: null })));
++      writeAudit('update', 'tea_harvest', `Reset agent payment for ${agent} on ${date} (${rows.length} session${rows.length!==1?'s':''})`);
++    } catch (e) { alert('Failed to reset: ' + e.message); }
++  };
++  const deleteSettlementRecord = async (id) => {
++    if (!window.confirm('Delete this bulk payment record? The sessions it covered (that don\'t have their own inline payment) will show as unpaid again.')) return;
++    try { await settlementService.delete(id); writeAudit('delete', 'tea_settlements', `Deleted settlement ${id}`); }
++    catch (e) { alert('Failed to delete: ' + e.message); }
++  };
++  const deleteAgentPaymentRecord = async (id) => {
++    if (!window.confirm('Delete this bulk payment record? The sessions it covered (that don\'t have their own inline payment) will show as unpaid again.')) return;
++    try { await agentPaymentService.delete(id); writeAudit('delete', 'tea_agent_payments', `Deleted agent payment ${id}`); }
++    catch (e) { alert('Failed to delete: ' + e.message); }
++  };
++
++  const clearForm = () => { setBags([]); setEditingHarvestId(null); setHDate(todayStr()); };
++
++  // Inline rate edit from the Harvest Log table — recalculates agent revenue
++  // and rate status automatically, without touching the rest of the entry.
++  const updateHarvestRate = async (id, newRate) => {
++    const entry = harvest.find(h => h.id === id);
++    if (!entry) return;
++    const rate = Math.max(0, parseFloat(newRate) || 0);
++    const agentRev = parseFloat(((entry.tNet || 0) * rate).toFixed(1));
++    const rateStatus = rate > 0 ? 'confirmed' : 'no-rate';
++    try {
++      await harvestChaayaService.update(id, { rate, agentRev, rateStatus });
++      writeAudit('update', 'tea_harvest', `Updated rate for ${entry.agent} on ${entry.date} to ₹${rate}/kg`);
++    } catch (e) { alert('Failed to update rate: ' + e.message); }
++  };
++
++  // Inline worker/agent payment edit from the Harvest Log table — writes
++  // straight onto that harvest row (amount + date), independent of any
++  // lump-sum settlement recorded in the Worker/Agent Payments tabs.
++  const updateHarvestWorkerPay = async (id, amount, date) => {
++    const entry = harvest.find(h => h.id === id);
++    if (!entry) return;
++    const amt = Math.max(0, parseFloat(amount) || 0);
++    try {
++      await harvestChaayaService.update(id, { workerPayAmount: amt, workerPayDate: amt > 0 ? (date || todayStr()) : null });
++      writeAudit('update', 'tea_harvest', `Updated worker payment for ${entry.worker} on ${entry.date} to ₹${amt}`);
++    } catch (e) { alert('Failed to update worker payment: ' + e.message); }
++  };
++  const updateHarvestAgentPay = async (id, amount, date) => {
++    const entry = harvest.find(h => h.id === id);
++    if (!entry) return;
++    const amt = Math.max(0, parseFloat(amount) || 0);
++    try {
++      await harvestChaayaService.update(id, { agentPayAmount: amt, agentPayDate: amt > 0 ? (date || todayStr()) : null });
++      writeAudit('update', 'tea_harvest', `Updated agent payment for ${entry.agent} on ${entry.date} to ₹${amt}`);
++    } catch (e) { alert('Failed to update agent payment: ' + e.message); }
++  };
++
++  // Marks a harvest row's worker pay fully settled (workerPayAmount = full
++  // session earning, so the row shows Paid), and simultaneously nets that
++  // amount against the worker's pending advances — so what actually gets
++  // physically handed to the worker is the balance after the advance, while
++  // the row itself is correctly accounted as settled either way. Only
++  // advances borrowed on or before this session's date count — an advance
++  // taken later shouldn't retroactively reduce an earlier session's payout.
++  const payWorkerRowNetOfAdvance = async (id) => {
++    const entry = harvest.find(h => h.id === id);
++    if (!entry) return;
++    const sessionAmount = entry.workerPay || 0;
++    const pendingAdv = advances
++      .filter(a => a.worker === entry.worker && !a.deducted && (a.date || '') <= (entry.date || ''))
++      .reduce((s, a) => s + (a.amount || 0), 0);
++    const advanceApplied = Math.min(pendingAdv, sessionAmount);
++    const cash = parseFloat((sessionAmount - advanceApplied).toFixed(2));
++    const d = todayStr();
++    try {
++      await harvestChaayaService.update(id, { workerPayAmount: sessionAmount, workerPayDate: d });
++      if (advanceApplied > 0) await consumeWorkerAdvance(advances.filter(a => (a.date || '') <= (entry.date || '')), entry.worker, advanceApplied);
++      writeAudit('update', 'tea_harvest',
++        advanceApplied > 0
++          ? `Paid ${entry.worker} on ${entry.date}: ₹${cash} cash + ₹${advanceApplied} netted from advance`
++          : `Paid ${entry.worker} on ${entry.date}: ₹${cash} cash`);
++    } catch (e) { alert('Failed to record payment: ' + e.message); }
++  };
++
++  // Plain "mark paid" — pays the full session amount in cash, without
++  // netting any advance. Useful when you want to settle the advance
++  // separately (e.g. deduct it from a different session).
++  const payWorkerRowFull = async (id) => {
++    const entry = harvest.find(h => h.id === id);
++    if (!entry) return;
++    const sessionAmount = entry.workerPay || 0;
++    const d = todayStr();
++    try {
++      await harvestChaayaService.update(id, { workerPayAmount: sessionAmount, workerPayDate: d });
++      writeAudit('update', 'tea_harvest', `Paid ${entry.worker} on ${entry.date}: ₹${sessionAmount} cash (no advance netted)`);
++    } catch (e) { alert('Failed to record payment: ' + e.message); }
++  };
++
+   const editHarvestEntry = useCallback((entry) => {
+     setEditingHarvestId(entry.id);
+     setHDate(entry.date || todayStr());
+@@ -263,6 +378,7 @@ Deleting it will allow transactions on this field again. Are you sure?`);
+       ? entry.bagDetails
+       : [{ gross: entry.tGross || 0, bagWt: entry.tBagDed || 0, waterKg: entry.tWaterDed || 0 }]);
+     setTab('harvest');
++    setHarvestSubTab('log');
+   }, [workerList, fieldList, agentList]);
+ 
+   const saveEntity = async (form) => {
+@@ -299,7 +415,7 @@ Deleting it will allow transactions on this field again. Are you sure?`);
+     if (!amount) return alert('Enter amount');
+     await agentPaymentService.add({ agent, amount, date, method, notes });
+     writeAudit('create','tea_agent_payments',`Agent payment: ${agent} ${amount} on ${date}`);
+-    setAgentPayModal(false);
++    setAgentPayModal({ open: false, agent: null });
+   };
+ 
+   const dashH         = useMemo(() => getFilteredHarvest(harvest, dashPeriod),  [harvest, dashPeriod]);
+@@ -321,7 +437,14 @@ Deleting it will allow transactions on this field again. Are you sure?`);
+     });
+     return result;
+   }, [harvest]);
+-  const filteredHarvest = useMemo(() => harvestFilter === 'all' ? harvest : harvest.filter(e => (e.weekStr || weekLabel(e.date)) === harvestFilter), [harvest, harvestFilter]);
++  const harvestWithPay = useMemo(
++    () => enrichHarvestWithPaymentStatus(harvest, settlements, agentPayments),
++    [harvest, settlements, agentPayments]
++  );
++  const filteredHarvestWithPay = useMemo(
++    () => harvestFilter === 'all' ? harvestWithPay : harvestWithPay.filter(e => (e.weekStr || weekLabel(e.date)) === harvestFilter),
++    [harvestWithPay, harvestFilter]
++  );
+ 
+   return (
+     <div className="ch-page">
+@@ -331,7 +454,7 @@ Deleting it will allow transactions on this field again. Are you sure?`);
+           <p className="page-subtitle">Week: {currentWeekLabel()} · {harvest.length} sessions total</p>
+         </div>
+         {isAdmin && (
+-          <button className="ch-btn ch-btn-primary" onClick={() => setTab('harvest')}>+ Log Harvest</button>
++          <button className="ch-btn ch-btn-primary" onClick={() => { setTab('harvest'); setHarvestSubTab('log'); }}>+ Log Harvest</button>
+         )}
+       </div>
+ 
+@@ -359,7 +482,8 @@ Deleting it will allow transactions on this field again. Are you sure?`);
+           />
+         )}
+         {tab === 'harvest' && (
+-          <HarvestTab
++          <HarvestHub
++            subTab={harvestSubTab} setSubTab={setHarvestSubTab}
+             leasedFields={leasedFields}
+             isAdmin={isAdmin} bags={bags} setBags={setBags}
+             deductMode={deductMode} setDeductMode={setDeductMode}
+@@ -370,24 +494,22 @@ Deleting it will allow transactions on this field again. Are you sure?`);
+             workerList={workerList} agentList={agentList} fieldList={fieldList}
+             rates={rates} editingHarvestId={editingHarvestId}
+             saveHarvest={saveHarvest} savingHarvest={savingHarvest}
+-            clearForm={() => { setBags([]); setEditingHarvestId(null); setHDate(todayStr()); }}
+-            filteredHarvest={filteredHarvest} harvestFilter={harvestFilter}
++            clearForm={clearForm}
++            filteredHarvest={filteredHarvestWithPay} harvestFilter={harvestFilter}
+             setHarvestFilter={setHarvestFilter} harvestWeeks={harvestWeeks}
+             editHarvestEntry={editHarvestEntry}
+             deleteHarvestEntry={async id => { if (window.confirm('Delete?')) { await harvestChaayaService.delete(id); writeAudit('delete','tea_harvest',`Deleted harvest ${id}`); } }}
+             pendingRateSessions={pendingRateSessions}
+-          />
+-        )}
+-        {tab === 'settlements' && (
+-          <SettlementsTab
+-            isAdmin={isAdmin} harvest={harvest} settlements={settlements}
+-            advances={advances} agentPayments={agentPayments} workerList={workerList}
+-            onWorkerPay={(w, amt, isFloat) => setWorkerSettleModal({ open: true, worker: w, amount: amt, isFloat })}
+-            onEditSettlement={s => { setEditSettlement(s); setWorkerSettleModal({ open: true, worker: s.worker, amount: s.netPaid, isFloat: false }); }}
+-            onAgentPay={() => setAgentPayModal(true)}
+-            onDeleteSettlement={async id => { if (window.confirm('Delete?')) { await settlementService.delete(id); writeAudit('delete','tea_settlements',`Deleted settlement ${id}`); } }}
+-            onEditAgentPayment={p => { setEditAgentPayment(p); setAgentPayModal(true); }}
+-            onDeleteAgentPayment={async id => { if (window.confirm('Delete?')) { await agentPaymentService.delete(id); writeAudit('delete','tea_agent_payments',`Deleted agent payment ${id}`); } }}
++            onUpdateRate={updateHarvestRate}
++            onUpdateWorkerPay={updateHarvestWorkerPay}
++            onUpdateAgentPay={updateHarvestAgentPay}
++            onPayWorkerNetOfAdvance={payWorkerRowNetOfAdvance}
++            onPayWorkerFull={payWorkerRowFull}
++            harvest={harvest} settlements={settlements} advances={advances} agentPayments={agentPayments} maintenance={maintenance}
++            onDeleteSettlement={deleteSettlementRecord}
++            onDeleteAgentPayment={deleteAgentPaymentRecord}
++            onResetWorkerLog={resetWorkerPaymentsForDate}
++            onResetAgentLog={resetAgentPaymentsForDate}
+           />
+         )}
+         {tab === 'advances' && (
+@@ -417,28 +539,6 @@ Deleting it will allow transactions on this field again. Are you sure?`);
+             onDelete={id => { if (window.confirm('Delete?')) maintenanceService.delete(id).then(()=>writeAudit('delete','tea_maintenance',`Deleted maintenance record ${id}`)); }}
+           />
+         )}
+-        {tab === 'rates' && (
+-          <RatesTab
+-            isAdmin={isAdmin} rates={rates} agentList={agentList}
+-            onSave={async data => {
+-              if (!data.agent)    return alert('❌ Please select an agent.');
+-              if (!data.rate || Number(data.rate) <= 0) return alert('❌ Please enter a valid rate.');
+-              if (!data.startDate) return alert('❌ Please enter a from date.');
+-              await ratesChaayaService.add(data); writeAudit('create','tea_market_rates',`Added rate: ${data.agent} ₹${data.rate}/kg from ${data.startDate}`); }}
+-            onUpdate={async (id,data) => {
+-              await updateDoc(doc(db, 'tea_market_rates', id), { ...data });
+-              writeAudit('update','tea_market_rates',`Updated rate: ${data.agent} ₹${data.rate}/kg from ${data.startDate}`); }}
+-            onDelete={async id => {
+-              const rate = rates.find(r => r.id === id);
+-              if (!rate) return;
+-              const ok = await checkBeforeDelete('market_rate', id, rate);
+-              if (!ok) return;
+-              if (!window.confirm(`Delete this rate for ${rate.agent}?`)) return;
+-              await ratesChaayaService.delete(id);
+-              writeAudit('delete','tea_market_rates',`Deleted rate: ${rate.agent} from ${rate.startDate||rate.fromDate}`);
+-            }}
+-          />
+-        )}
+         {tab === 'analytics' && (
+           <AnalyticsTab
+             anaH={anaH} anaPeriod={anaPeriod} setAnaPeriod={setAnaPeriod}
+@@ -544,10 +644,10 @@ Deleting it will allow transactions on this field again. Are you sure?`);
+         onSave={saveWorkerSettlement}
+       />
+       <AgentPayModal
+-        open={agentPayModal}
++        open={agentPayModal.open} defaultAgent={agentPayModal.agent}
+         editPayment={editAgentPayment} agentList={agentList} harvest={harvest}
+         agentPayments={agentPayments}
+-        onClose={() => { setAgentPayModal(false); setEditAgentPayment(null); }}
++        onClose={() => { setAgentPayModal({ open: false, agent: null }); setEditAgentPayment(null); }}
+         onSave={saveAgentPayment}
+       />
+     </div>
+diff --git a/src/pages/tea/BagBuilder.js b/src/pages/tea/BagBuilder.js
+index 9d957fe..f352c72 100644
+--- a/src/pages/tea/BagBuilder.js
++++ b/src/pages/tea/BagBuilder.js
+@@ -3,7 +3,7 @@ import {getRateForAgentDate,inr} from '../../utils/chaayaService';
+ 
+ const WORKER_RATE = 6;
+ 
+-export default function BagBuilder({bags, onChange, agentName, dateStr, rates}) {
++export default function BagBuilder({bags, onChange, agentName, dateStr, rates, rateOverride, onRateOverrideChange}) {
+   const inputRefs = useRef([]);
+   const lastAddedRef = useRef(null);
+ 
+@@ -49,7 +49,9 @@ export default function BagBuilder({bags, onChange, agentName, dateStr, rates})
+   const totalNet   = parseFloat((totalGross - sessionBagDed - sessionWaterDed).toFixed(2));
+ 
+   const rateRec   = getRateForAgentDate(rates, agentName, dateStr);
+-  const rate      = rateRec ? rateRec.rate : 0;
++  const lookedUpRate = rateRec ? rateRec.rate : 0;
++  const hasOverride = rateOverride !== '' && rateOverride != null && !isNaN(parseFloat(rateOverride));
++  const rate      = hasOverride ? parseFloat(rateOverride) : lookedUpRate;
+   const workerPay = Math.round(totalNet * WORKER_RATE);
+   const agentRev  = parseFloat((totalNet * rate).toFixed(1));
+ 
+@@ -65,13 +67,25 @@ export default function BagBuilder({bags, onChange, agentName, dateStr, rates})
+ 
+   return (
+     <div>
+-      {/* Rate banner */}
+-      <div className={`ch-rate-banner${!rateRec ? ' no-rate' : ''}`}>
+-        <span style={{color: 'var(--muted)'}}>Active rate — {agentName || 'select agent'}</span>
+-        <span style={{fontFamily: 'var(--font-mono)', fontWeight: 500, fontSize: 15,
+-          color: rateRec ? 'var(--success)' : 'var(--danger)'}}>
+-          {rateRec ? `₹${rate}/kg${rateRec.isPlaceholder ? ' ⏳ est.' : ''}` : 'No rate found — set one in Market Rates'}
+-        </span>
++      {/* Rate — entered/confirmed directly here */}
++      <div className={`ch-rate-banner${!hasOverride && !rateRec ? ' no-rate' : ''}`} style={{alignItems:'center'}}>
++        <span style={{color: 'var(--muted)'}}>Rate (₹/kg) — {agentName || 'select agent'}</span>
++        <div style={{display:'flex',alignItems:'center',gap:8}}>
++          <input
++            className="ch-input"
++            type="number" step="0.1" min="0"
++            value={rateOverride}
++            onChange={e => onRateOverrideChange && onRateOverrideChange(e.target.value)}
++            placeholder={rateRec ? String(lookedUpRate) : '0.0'}
++            style={{width:90,padding:'5px 8px',fontFamily:'var(--font-mono)',fontWeight:600,textAlign:'right'}}
++          />
++          {!hasOverride && rateRec && (
++            <span style={{fontSize:11,color:'var(--muted)'}}>using {rateRec.isPlaceholder?'⏳ estimated':'confirmed'} rate — type to override</span>
++          )}
++          {!hasOverride && !rateRec && (
++            <span style={{fontSize:11,color:'var(--danger)'}}>no rate on file — type one, or leave blank and fill it in later</span>
++          )}
++        </div>
+       </div>
+ 
+       {/* Bag list */}
+diff --git a/src/pages/tea/HarvestHub.js b/src/pages/tea/HarvestHub.js
+new file mode 100644
+index 0000000..2e98028
+--- /dev/null
++++ b/src/pages/tea/HarvestHub.js
+@@ -0,0 +1,115 @@
++import React, { useState } from 'react';
++import { HARVEST_SUBTABS } from './chaayaStyles';
++import HarvestTab from './HarvestTab';
++import RatePaymentsTab from './RatePaymentsTab';
++import { RatesTab } from './OperationsTabs';
++import SettlementsTab from './SettlementsTab';
++
++// Consolidates Log Harvest, Rate & Payments, Market Rates, Worker Payments,
++// and Agent Payments into a single "Harvest Log" tab with its own
++// sub-navigation. Advances is intentionally kept out of this hub as its own
++// top-level tab.
++//
++// All data entry (intake in Log Harvest; rate/worker payment/agent payment
++// in Rate & Payments) happens directly on each harvest row. Market Rates,
++// Worker Payments, and Agent Payments are all fully read-only — they're
++// aggregated logs derived from the harvest rows, not places to enter data.
++export default function HarvestHub({
++  // shared
++  isAdmin, pendingRateSessions,
++  // harvest tab props
++  leasedFields, bags, setBags, deductMode, setDeductMode,
++  hDate, setHDate, hWorker, setHWorker, hField, setHField, hAgent, setHAgent,
++  workerList, agentList, fieldList, rates, editingHarvestId,
++  saveHarvest, savingHarvest, clearForm,
++  filteredHarvest, harvestFilter, setHarvestFilter, harvestWeeks,
++  editHarvestEntry, deleteHarvestEntry, onUpdateRate, onUpdateWorkerPay, onUpdateAgentPay, onPayWorkerNetOfAdvance, onPayWorkerFull,
++  onDeleteSettlement, onDeleteAgentPayment, onResetWorkerLog, onResetAgentLog,
++  // settlements (worker + agent) props
++  harvest, settlements, advances, agentPayments, maintenance,
++  // sub-tab control (optional — defaults to internal state)
++  subTab, setSubTab,
++}) {
++  const [internalSub, setInternalSub] = useState('log');
++  const sub = subTab || internalSub;
++  const goSub = setSubTab || setInternalSub;
++
++  return (
++    <div>
++      <div className="ch-tabs" style={{ marginBottom: 18 }}>
++        {HARVEST_SUBTABS.map(t => (
++          <button
++            key={t.key}
++            className={`ch-tab ${sub === t.key ? 'active' : ''}`}
++            onClick={() => goSub(t.key)}
++          >
++            {t.label}
++            {t.key === 'ratepay' && pendingRateSessions > 0 && (
++              <span style={{
++                marginLeft: 5, background: 'var(--warn)', borderRadius: '50%',
++                width: 7, height: 7, display: 'inline-block', verticalAlign: 'middle',
++              }} />
++            )}
++          </button>
++        ))}
++      </div>
++
++      {sub === 'log' && (
++        <HarvestTab
++          leasedFields={leasedFields}
++          isAdmin={isAdmin} bags={bags} setBags={setBags}
++          deductMode={deductMode} setDeductMode={setDeductMode}
++          hDate={hDate} setHDate={setHDate}
++          hWorker={hWorker} setHWorker={setHWorker}
++          hField={hField} setHField={setHField}
++          hAgent={hAgent} setHAgent={setHAgent}
++          workerList={workerList} agentList={agentList} fieldList={fieldList}
++          rates={rates} editingHarvestId={editingHarvestId}
++          saveHarvest={saveHarvest} savingHarvest={savingHarvest}
++          clearForm={clearForm}
++          filteredHarvest={filteredHarvest} harvestFilter={harvestFilter}
++          setHarvestFilter={setHarvestFilter} harvestWeeks={harvestWeeks}
++          editHarvestEntry={editHarvestEntry}
++          deleteHarvestEntry={deleteHarvestEntry}
++          pendingRateSessions={pendingRateSessions}
++          onGoToRatePayments={() => goSub('ratepay')}
++        />
++      )}
++
++      {sub === 'ratepay' && (
++        <RatePaymentsTab
++          harvest={filteredHarvest}
++          advances={advances}
++          pendingRateSessions={pendingRateSessions}
++          onUpdateRate={onUpdateRate}
++          onUpdateWorkerPay={onUpdateWorkerPay}
++          onUpdateAgentPay={onUpdateAgentPay}
++          onPayWorkerNetOfAdvance={onPayWorkerNetOfAdvance}
++          onPayWorkerFull={onPayWorkerFull}
++        />
++      )}
++
++      {sub === 'rates' && <RatesTab harvest={harvest} maintenance={maintenance} />}
++
++      {sub === 'worker' && (
++        <SettlementsTab
++          forceView="workers"
++          harvest={harvest} settlements={settlements}
++          advances={advances} agentPayments={agentPayments} workerList={workerList}
++          onDeleteSettlement={onDeleteSettlement}
++          onResetWorkerLog={onResetWorkerLog}
++        />
++      )}
++
++      {sub === 'agent' && (
++        <SettlementsTab
++          forceView="agents"
++          harvest={harvest} settlements={settlements}
++          advances={advances} agentPayments={agentPayments} workerList={workerList}
++          onDeleteAgentPayment={onDeleteAgentPayment}
++          onResetAgentLog={onResetAgentLog}
++        />
++      )}
++    </div>
++  );
++}
+diff --git a/src/pages/tea/HarvestTab.js b/src/pages/tea/HarvestTab.js
+index 7e2bf19..18f46c3 100644
+--- a/src/pages/tea/HarvestTab.js
++++ b/src/pages/tea/HarvestTab.js
+@@ -1,6 +1,4 @@
+ import React, { useState, useMemo } from 'react';
+-import {inr} from '../../utils/chaayaService';
+-
+ import BagBuilder from './BagBuilder';
+ 
+ export default function HarvestTab({
+@@ -9,7 +7,7 @@ export default function HarvestTab({
+   workerList,agentList,fieldList,rates,editingHarvestId,
+   saveHarvest,savingHarvest,clearForm,
+   filteredHarvest,harvestFilter,setHarvestFilter,harvestWeeks,
+-  editHarvestEntry,deleteHarvestEntry,pendingRateSessions,
++  editHarvestEntry,deleteHarvestEntry,pendingRateSessions,onGoToRatePayments,
+ }){
+   const [fField,  setFField]  = useState('all');
+   const [fAgent,  setFAgent]  = useState('all');
+@@ -45,9 +43,18 @@ export default function HarvestTab({
+           <div>
+             <strong>{pendingRateSessions} session{pendingRateSessions!==1?'s':''} used an estimated rate.</strong>
+             <div style={{marginTop:3,color:'var(--muted)',fontSize:'0.8rem',lineHeight:1.6}}>
+-              Once the agent confirms the final rate, go to <strong style={{color:'var(--text)'}}>◇ Market Rates</strong> and
+-              add the confirmed rate with the correct date range. Then edit each ⏳ session above and re-save —
+-              revenue figures will update automatically. This banner clears when all sessions show a confirmed rate.
++              Once the agent confirms the final rate, go to{' '}
++              {onGoToRatePayments ? (
++                <button
++                  onClick={onGoToRatePayments}
++                  style={{background:'none',border:'none',padding:0,color:'var(--text)',fontWeight:600,textDecoration:'underline',cursor:'pointer',font:'inherit'}}
++                >
++                  Rate &amp; Payments
++                </button>
++              ) : (
++                <strong style={{color:'var(--text)'}}>Rate &amp; Payments</strong>
++              )}{' '}
++              and type it in — revenue and payment figures update automatically. This banner clears when all sessions show a confirmed rate.
+             </div>
+           </div>
+         </div>
+@@ -151,19 +158,20 @@ export default function HarvestTab({
+           </div>
+         </div>
+ 
++        {/* ── Section 1: Intake — what came in from the field ── */}
++        <div style={{padding:'16px 20px 4px',fontFamily:'var(--font-display)',fontSize:15,fontWeight:600,color:'var(--text)'}}>🌿 Intake</div>
+         <div style={{overflowX:'auto'}}>
+-          <table className="ch-table">
++          <table className="ch-table ch-harvest-table">
+             <thead>
+               <tr>
+                 <th>Date</th><th>Worker</th><th>Field</th><th>Agent</th><th>Bags</th>
+                 <th>Gross</th><th>Bag ded</th><th>Water ded</th><th>Net kg</th>
+-                <th>Worker pay</th><th>Rate</th><th>Agent rev</th>
+-                {isAdmin&&<th></th>}
++                {isAdmin&&<th className="ch-sticky-actions-th"></th>}
+               </tr>
+             </thead>
+             <tbody>
+               {displayed.length===0&&(
+-                <tr><td colSpan={13} style={{textAlign:'center',padding:40,color:'var(--muted)'}}>
++                <tr><td colSpan={9+(isAdmin?1:0)} style={{textAlign:'center',padding:40,color:'var(--muted)'}}>
+                   No matching entries.
+                 </td></tr>
+               )}
+@@ -175,17 +183,10 @@ export default function HarvestTab({
+                   <td><span className="ch-badge ch-badge-blue">{e.bags} bags</span></td>
+                   <td>{(e.tGross||0).toFixed(1)}</td>
+                   <td style={{color:'var(--accent)'}}>−{(e.tBagDed||0).toFixed(2)}</td>
+-                  <td style={{color:'var(--danger)'}}>−{(e.tWaterDed||0).toFixed(2)} <span style={{fontSize:10,opacity:.6}}>({(e.avgWaterPct||0).toFixed(1)}%)</span></td>
++                  <td style={{color:'var(--danger)'}}>−{(e.tWaterDed||0).toFixed(2)} ({(e.avgWaterPct||0).toFixed(1)}%)</td>
+                   <td style={{fontWeight:700}}>{(e.tNet||0).toFixed(2)}</td>
+-                  <td style={{color:'var(--success)'}}>{inr(e.workerPay||0)}</td>
+-                  <td style={{fontFamily:'var(--font-mono)',fontSize:12}}>
+-                    ₹{e.rate||0}/kg
+-                    {e.rateStatus==='placeholder'&&<span style={{background:'rgba(201,148,26,.15)',color:'var(--accent)',borderRadius:4,padding:'1px 5px',fontSize:10,marginLeft:4}}>⏳ est.</span>}
+-                    {e.rateStatus==='no-rate'&&<span style={{background:'rgba(184,74,46,.12)',color:'var(--danger)',borderRadius:4,padding:'1px 5px',fontSize:10,marginLeft:4}}>no rate</span>}
+-                  </td>
+-                  <td style={{fontFamily:'var(--font-mono)'}}>₹{(e.agentRev||0).toFixed(1)}</td>
+                   {isAdmin&&(
+-                    <td>
++                    <td className="ch-sticky-actions-td">
+                       <div style={{display:'flex',gap:5}}>
+                         <button className="ch-btn ch-btn-edit ch-btn-sm" onClick={()=>editHarvestEntry(e)}>Edit</button>
+                         <button className="ch-btn ch-btn-danger ch-btn-sm" onClick={()=>deleteHarvestEntry(e.id)}>✕</button>
+@@ -198,10 +199,7 @@ export default function HarvestTab({
+                 <tr style={{background:'var(--surface2)',fontWeight:600}}>
+                   <td colSpan={8} style={{textAlign:'right',color:'var(--muted)'}}>Totals</td>
+                   <td>{displayed.reduce((s,e)=>s+(e.tNet||0),0).toFixed(2)} kg</td>
+-                  <td style={{color:'var(--success)'}}>{inr(displayed.reduce((s,e)=>s+(e.workerPay||0),0))}</td>
+-                  <td></td>
+-                  <td style={{fontFamily:'var(--font-mono)'}}>₹{displayed.reduce((s,e)=>s+(e.agentRev||0),0).toFixed(1)}</td>
+-                  {isAdmin&&<td></td>}
++                  {isAdmin&&<td className="ch-sticky-actions-td"></td>}
+                 </tr>
+               )}
+             </tbody>
+diff --git a/src/pages/tea/InlineEditCells.js b/src/pages/tea/InlineEditCells.js
+new file mode 100644
+index 0000000..7272394
+--- /dev/null
++++ b/src/pages/tea/InlineEditCells.js
+@@ -0,0 +1,131 @@
++import React, { useState, useEffect } from 'react';
++import { todayStr } from '../../utils/chaayaService';
++
++// Rate is edited directly here — no need to open the harvest entry form.
++// Saves on blur or Enter; agent revenue recalculates automatically server-side.
++export function EditableRateCell({id,rate,rateStatus,onUpdateRate}){
++  const [val,setVal]=useState(rate||'');
++  const [saving,setSaving]=useState(false);
++  useEffect(()=>{ setVal(rate||''); },[rate,id]);
++  const commit=async()=>{
++    const num=parseFloat(val)||0;
++    if(num===(rate||0))return;
++    setSaving(true);
++    try{ await onUpdateRate(id,num); } finally { setSaving(false); }
++  };
++  return(
++    <div className="ch-inline-pay-cell">
++      <span style={{color:'var(--muted)'}}>₹</span>
++      <input
++        type="number" step="0.1" min="0"
++        value={val}
++        disabled={!onUpdateRate||saving}
++        onChange={ev=>setVal(ev.target.value)}
++        onBlur={commit}
++        onKeyDown={ev=>{ if(ev.key==='Enter') ev.target.blur(); }}
++        className="ch-inline-input ch-inline-input-amt"
++      />
++      <span style={{color:'var(--muted)'}}>/kg</span>
++      {rateStatus==='placeholder'&&<span className="ch-badge ch-badge-gold">⏳ est.</span>}
++      {rateStatus==='no-rate'&&<span className="ch-badge ch-badge-gold" style={{opacity:.7}}>no rate</span>}
++    </div>
++  );
++}
++
++// Worker/Agent payment — edited directly here, same pattern as Rate. Typing
++// an amount and/or date saves immediately onto this harvest row. The ✓ button
++// is a one-click shortcut for the common case of paying the whole session
++// amount today; once paid, it becomes an ↺ undo button.
++export function EditablePayCell({id,paidAmount,paidDate,total,onUpdate,advance,onMarkPaidWithAdvance,onMarkPaidFull}){
++  const [amt,setAmt]=useState(paidAmount||'');
++  const [date,setDate]=useState(paidDate||'');
++  const [saving,setSaving]=useState(false);
++  useEffect(()=>{ setAmt(paidAmount||''); setDate(paidDate||''); },[paidAmount,paidDate,id]);
++
++  const safeTotal = total||0;
++  const safeAdvance = advance||0;
++  const status = !amt||parseFloat(amt)<=0 ? 'pending' : parseFloat(amt)>=safeTotal-0.5 ? 'paid' : 'partial';
++
++  const commitAmt=async()=>{
++    const num=parseFloat(amt)||0;
++    if(num===(paidAmount||0))return;
++    setSaving(true);
++    try{
++      const useDate=date||todayStr();
++      if(num>0&&!date)setDate(useDate);
++      await onUpdate(id,num,num>0?useDate:date);
++    } finally { setSaving(false); }
++  };
++  const commitDate=async(d)=>{
++    setDate(d);
++    await onUpdate(id,parseFloat(amt)||0,d);
++  };
++  const markPaid=async(netAdvance)=>{
++    setSaving(true);
++    try{
++      if(netAdvance && safeAdvance>0 && onMarkPaidWithAdvance){
++        await onMarkPaidWithAdvance();
++      } else if(onMarkPaidFull){
++        await onMarkPaidFull();
++      } else {
++        const d=todayStr();
++        setAmt(safeTotal); setDate(d);
++        await onUpdate(id,safeTotal,d);
++      }
++    } finally { setSaving(false); }
++  };
++  const undoPay=async()=>{
++    if(!window.confirm('Undo this payment? It will be marked unpaid again.'))return;
++    setAmt(''); setDate('');
++    setSaving(true);
++    try{ await onUpdate(id,0,null); } finally { setSaving(false); }
++  };
++
++  const cashIfNetted = Math.max(0, safeTotal-Math.min(safeAdvance,safeTotal));
++
++  const statusColor = status==='paid' ? 'var(--success)' : status==='partial' ? 'var(--accent)' : 'var(--text)';
++
++  return(
++    <div className="ch-inline-pay-cell">
++      <span style={{color:'var(--muted)'}}>₹</span>
++      <input
++        type="number" step="1" min="0"
++        value={amt}
++        disabled={!onUpdate||saving}
++        onChange={ev=>setAmt(ev.target.value)}
++        onBlur={commitAmt}
++        onKeyDown={ev=>{ if(ev.key==='Enter') ev.target.blur(); }}
++        placeholder="0"
++        className="ch-inline-input ch-inline-input-amt"
++        style={{color:statusColor,fontWeight:status!=='pending'?700:400,borderColor:status==='paid'?'var(--success)':status==='partial'?'var(--accent)':undefined}}
++      />
++      <input
++        type="date" value={date} disabled={!onUpdate||saving}
++        onChange={ev=>commitDate(ev.target.value)}
++        className="ch-inline-input ch-inline-input-date"
++        style={{color:statusColor,borderColor:status==='paid'?'var(--success)':status==='partial'?'var(--accent)':undefined}}
++      />
++      {onUpdate && status==='pending' && safeAdvance>0 && (
++        <div style={{display:'flex',flexDirection:'column',gap:2,alignItems:'flex-start'}}>
++          <button onClick={()=>markPaid(true)} disabled={saving||safeTotal<=0} className="ch-inline-tick"
++            title={`Pays ₹${cashIfNetted.toFixed(0)} cash and clears ₹${Math.min(safeAdvance,safeTotal).toFixed(0)} off the advance`}>
++            Pay ₹{cashIfNetted.toFixed(0)} (after advance)
++          </button>
++          <button onClick={()=>markPaid(false)} disabled={saving||safeTotal<=0}
++            style={{background:'none',border:'none',padding:0,fontSize:10,color:'var(--muted)',textDecoration:'underline',cursor:'pointer',whiteSpace:'nowrap'}}
++            title="Pay the full session amount — advance stays pending, handle it separately">
++            or pay full ₹{safeTotal.toFixed(0)} instead
++          </button>
++        </div>
++      )}
++      {onUpdate && status==='pending' && safeAdvance<=0 && (
++        <button onClick={()=>markPaid(false)} disabled={saving||safeTotal<=0} className="ch-inline-tick" title="Mark full amount paid today">
++          Paid
++        </button>
++      )}
++      {onUpdate && status!=='pending' && (
++        <button onClick={undoPay} disabled={saving} title="Undo this payment" className="ch-inline-tick ch-inline-undo">↺</button>
++      )}
++    </div>
++  );
++}
+diff --git a/src/pages/tea/OperationsTabs.js b/src/pages/tea/OperationsTabs.js
+index 051b4a0..bf58b23 100644
+--- a/src/pages/tea/OperationsTabs.js
++++ b/src/pages/tea/OperationsTabs.js
+@@ -1,5 +1,6 @@
+ import React,{useState} from 'react';
+-import {inr,todayStr} from '../../utils/chaayaService';
++import {inr,todayStr,agentRateLog,costPerKgBreakdown,periodBounds,periodLabel,getFilteredHarvest} from '../../utils/chaayaService';
++import PeriodBar from './PeriodBar';
+ 
+ 
+ const MAINT_TASKS=['Pruning','Cleaning','Weeding','Fertilizing','Pest Control','Irrigation','Harvesting Equipment','Other'];
+@@ -254,89 +255,84 @@ export function WeatherTab({isAdmin,weather,onSave,onDelete}){
+ }
+ 
+ // ── RATES TAB ─────────────────────────────────────────────────────────────────
+-export function RatesTab({isAdmin,rates,agentList,onSave,onUpdate,onDelete}){
+-  const agents=agentList;
+-  const emptyForm = {agent:agents[0]||'',rate:'',startDate:todayStr(),endDate:'',notes:''};
+-  const [form,setForm]=useState(emptyForm);
+-  const [editId,setEditId]=useState(null); // null = adding new, id = editing existing
+-  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+-
+-  const startEdit=(r)=>{
+-    setEditId(r.id);
+-    setForm({agent:r.agent,rate:String(r.rate),startDate:r.startDate||'',endDate:r.endDate||'',notes:r.notes||''});
+-  };
+-  const cancelEdit=()=>{ setEditId(null); setForm(emptyForm); };
+-
+-  const save=async()=>{
+-    if(!form.rate) return alert('Enter a rate');
+-    if(!form.startDate) return alert('Enter a from date');
+-    const data={agent:form.agent,rate:parseFloat(form.rate),startDate:form.startDate,endDate:form.endDate||null,notes:form.notes};
+-    if(editId){
+-      await onUpdate(editId,data);
+-      setEditId(null);
+-    } else {
+-      await onSave(data);
+-    }
+-    setForm(emptyForm);
+-  };
++export function RatesTab({harvest,maintenance=[]}){
++  const [period, setPeriod] = useState({ preset: 'all', ...periodBounds('all') });
++  const filteredHarvest = getFilteredHarvest(harvest, period);
++  const filteredMaintenance = maintenance.filter(m => m.date && m.date >= (period.from||'2000-01-01') && m.date <= (period.to||'2099-12-31'));
+ 
+-  const today=todayStr();
+-  const active=rates.filter(r=>r.startDate<=today&&(!r.endDate||r.endDate>=today));
++  const rows = agentRateLog(filteredHarvest);
++  const cpk = costPerKgBreakdown(filteredHarvest, filteredMaintenance);
++  const waterfall = [
++    ['Avg Rate (revenue)', cpk.avgRate, 'var(--success)', false],
++    ['− Bag/Water Deduction Loss', cpk.deductionLossPerKg, 'var(--danger)', true],
++    ['− Worker Payment', cpk.workerPerKg, 'var(--danger)', true],
++    ['− Field Maintenance', cpk.maintenancePerKg, 'var(--danger)', true],
++  ];
+   return(
+     <div>
+-      {isAdmin&&(
+-        <div className="ch-grid-2" style={{marginBottom:18}}>
+-          <div className="ch-card">
+-            <div className="ch-card-title" style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+-              <span>{editId ? 'Edit Rate' : 'Set New Rate'}</span>
+-              {editId && <button className="ch-btn ch-btn-ghost ch-btn-sm" onClick={cancelEdit}>Cancel</button>}
+-            </div>
+-            <div className="ch-form-group"><label>Agent</label>
+-              <select className="ch-input" value={form.agent} onChange={e=>set('agent',e.target.value)}>
+-                {agents.map(a=><option key={a}>{a}</option>)}
+-              </select></div>
+-            <div className="ch-grid-2">
+-              <div className="ch-form-group"><label>Rate (₹/kg)</label><input className="ch-input" type="number" step="0.01" value={form.rate} onChange={e=>set('rate',e.target.value)} placeholder="e.g. 42.00"/></div>
+-              <div className="ch-form-group"><label>Notes</label><input className="ch-input" value={form.notes} onChange={e=>set('notes',e.target.value)}/></div>
+-            </div>
+-            <div className="ch-grid-2">
+-              <div className="ch-form-group"><label>From (Saturday)</label><input className="ch-input" type="date" value={form.startDate} onChange={e=>set('startDate',e.target.value)}/></div>
+-              <div className="ch-form-group"><label>To (Friday, optional)</label><input className="ch-input" type="date" value={form.endDate} onChange={e=>set('endDate',e.target.value)}/></div>
++      <div style={{marginBottom:16}}>
++        <PeriodBar period={period} onChange={setPeriod}/>
++      </div>
++
++      <div className="ch-alert-info" style={{marginBottom:16}}>
++        ℹ️ This is a read-only log. Rates are entered directly on each harvest row — open a session in{' '}
++        <strong>Log Harvest</strong> and edit its <strong>Rate</strong> field. This log updates automatically.
++      </div>
++
++      {cpk.totalNetKg>0 && (
++        <div className="ch-card" style={{marginBottom:16}}>
++          <div className="ch-card-title">Per-Kg Cost Breakdown</div>
++          <div style={{fontSize:12,color:'var(--muted)',marginBottom:12}}>
++            Based on {cpk.totalNetKg.toFixed(0)} kg net harvested ({periodLabel(period)}, all agents) at an average rate of ₹{cpk.avgRate.toFixed(2)}/kg.
++          </div>
++          {waterfall.map(([label,val,color,isDeduction])=>(
++            <div key={label} className="ch-settle-row">
++              <span style={{color:'var(--muted)'}}>{label}</span>
++              <span style={{fontFamily:'var(--font-mono)',fontWeight:600,color}}>{isDeduction?'−':''}₹{val.toFixed(2)}/kg</span>
+             </div>
+-            <button className="ch-btn ch-btn-primary" style={{marginTop:12}} onClick={save}>
+-              {editId ? 'Update Rate' : 'Save Rate'}
+-            </button>
++          ))}
++          <div className="ch-total-row">
++            <span style={{fontSize:13,fontWeight:600,color:'var(--muted)'}}>Net Margin per kg</span>
++            <span style={{fontSize:17,fontWeight:700,color:cpk.netMarginPerKg>=0?'var(--success)':'var(--danger)'}}>₹{cpk.netMarginPerKg.toFixed(2)}/kg</span>
+           </div>
+-          <div className="ch-card">
+-            <div className="ch-card-title">Active Rates — Today</div>
+-            {active.length===0?<div style={{color:'var(--muted)',fontSize:13}}>No active rates for today.</div>:
+-              active.map(r=>(
+-                <div key={r.id} style={{background:'rgba(61,107,61,.06)',border:'1px solid rgba(61,107,61,.15)',borderRadius:8,padding:'10px 13px',display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+-                  <div><div style={{fontWeight:500,color:'var(--text)'}}>{r.agent}</div><div style={{fontSize:11.5,color:'var(--muted)'}}>{r.startDate} → {r.endDate||'ongoing'}</div></div>
+-                  <div style={{fontFamily:'var(--font-mono)',fontSize:17,fontWeight:500,color:'var(--success)'}}>₹{r.rate}/kg</div>
+-                </div>
++        </div>
++      )}
++
++      {cpk.taskBreakdown.length>0 && (
++        <div className="ch-card" style={{padding:0,marginBottom:16}}>
++          <div style={{padding:'14px 20px 0',fontFamily:'var(--font-display)',fontSize:16,fontWeight:600,color:'var(--text)'}}>Maintenance Cost by Task</div>
++          <div style={{padding:'4px 20px 0',fontSize:12,color:'var(--muted)'}}>Total maintenance: ₹{cpk.totalMaintenance.toFixed(0)} → ₹{cpk.maintenancePerKg.toFixed(2)}/kg overall</div>
++          <table className="ch-table">
++            <thead><tr><th>Task</th><th>Total Cost</th><th>₹/kg</th></tr></thead>
++            <tbody>
++              {cpk.taskBreakdown.map(t=>(
++                <tr key={t.task}>
++                  <td>{t.task}</td>
++                  <td style={{fontFamily:'var(--font-mono)'}}>₹{t.cost.toFixed(0)}</td>
++                  <td style={{fontFamily:'var(--font-mono)',fontWeight:600,color:'var(--danger)'}}>₹{t.perKg.toFixed(2)}/kg</td>
++                </tr>
+               ))}
+-          </div>
++            </tbody>
++          </table>
+         </div>
+       )}
++
+       <div className="ch-card" style={{padding:0}}>
+-        <div style={{padding:'14px 20px 0',fontFamily:'var(--font-display)',fontSize:16,fontWeight:600,color:'var(--text)'}}>Rate History</div>
++        <div style={{padding:'14px 20px 0',fontFamily:'var(--font-display)',fontSize:16,fontWeight:600,color:'var(--text)'}}>Rate History (from Harvest Log)</div>
+         <table className="ch-table">
+-          <thead><tr><th>Agent</th><th>Rate (₹/kg)</th><th>From</th><th>To</th><th>Notes</th>{isAdmin&&<th></th>}</tr></thead>
++          <thead><tr><th>Agent</th><th>Rate (₹/kg)</th><th>From</th><th>To</th><th>Sessions</th><th>Net kg</th><th>Status</th></tr></thead>
+           <tbody>
+-            {rates.length===0&&<tr><td colSpan={6} style={{textAlign:'center',padding:32,color:'var(--muted)'}}>No rates saved yet.</td></tr>}
+-            {rates.map(r=>(
+-              <tr key={r.id} style={{background:editId===r.id?'rgba(201,168,76,0.06)':''}}>
++            {rows.length===0&&<tr><td colSpan={7} style={{textAlign:'center',padding:32,color:'var(--muted)'}}>No rates recorded on any harvest session yet.</td></tr>}
++            {rows.map(r=>(
++              <tr key={r.agent+'|'+r.rate+'|'+r.from}>
+                 <td>{r.agent}</td>
+                 <td style={{fontFamily:'var(--font-mono)',fontWeight:600}}>₹{r.rate}/kg</td>
+-                <td>{r.startDate}</td><td>{r.endDate||'ongoing'}</td>
+-                <td style={{color:'var(--muted)',fontSize:12}}>{r.notes||'—'}</td>
+-                {isAdmin&&<td>
+-                  <div style={{display:'flex',gap:4}}>
+-                    <button className="ch-btn ch-btn-edit ch-btn-sm" onClick={()=>startEdit(r)}>Edit</button>
+-                    <button className="ch-btn ch-btn-danger ch-btn-sm" onClick={()=>onDelete(r.id)}>✕</button>
+-                  </div>
+-                </td>}
++                <td>{r.from}</td><td>{r.to}</td>
++                <td>{r.sessions}</td>
++                <td>{r.netKg.toFixed(1)}</td>
++                <td>{r.confirmed
++                  ? <span className="ch-badge ch-badge-green">Confirmed</span>
++                  : <span className="ch-badge ch-badge-gold" style={{opacity:.7}}>Estimated</span>}</td>
+               </tr>
+             ))}
+           </tbody>
+diff --git a/src/pages/tea/RatePaymentsTab.js b/src/pages/tea/RatePaymentsTab.js
+new file mode 100644
+index 0000000..4253edc
+--- /dev/null
++++ b/src/pages/tea/RatePaymentsTab.js
+@@ -0,0 +1,130 @@
++import React, { useState, useMemo } from 'react';
++import { inr } from '../../utils/chaayaService';
++import { EditableRateCell, EditablePayCell } from './InlineEditCells';
++
++// Per-session rate confirmation and worker/agent payment entry — split out
++// from Log Harvest so each tab stays focused (intake vs. money). Rate and
++// payment edits here save straight onto the harvest row, same as before.
++export default function RatePaymentsTab({
++  harvest, advances, pendingRateSessions, onUpdateRate, onUpdateWorkerPay, onUpdateAgentPay, onPayWorkerNetOfAdvance, onPayWorkerFull,
++}) {
++  const [fAgent, setFAgent]   = useState('all');
++  const [fWorker, setFWorker] = useState('all');
++
++  const rows = useMemo(() => {
++    return [...harvest]
++      .filter(e => fAgent  === 'all' || e.agent  === fAgent)
++      .filter(e => fWorker === 'all' || e.worker === fWorker)
++      .sort((a,b) => (b.date||'').localeCompare(a.date||''));
++  }, [harvest, fAgent, fWorker]);
++
++  // Pending advance as of each session's own date — an advance borrowed
++  // AFTER a session shouldn't retroactively reduce that session's payout.
++  const advanceAsOf = (worker, date) => (advances||[])
++    .filter(a => a.worker === worker && !a.deducted && (a.date||'') <= (date||''))
++    .reduce((s,a) => s + (a.amount||0), 0);
++
++  const hasFilter = fAgent!=='all' || fWorker!=='all';
++  const clearFilters = () => { setFAgent('all'); setFWorker('all'); };
++
++  return (
++    <div>
++      {pendingRateSessions > 0 && (
++        <div style={{
++          display:'flex',alignItems:'flex-start',gap:10,
++          background:'rgba(224,146,74,0.1)',border:'1px solid rgba(224,146,74,0.3)',
++          borderRadius:8,padding:'10px 14px',marginBottom:16,
++        }}>
++          <span style={{fontSize:18}}>⏳</span>
++          <div style={{fontSize:'0.85rem',color:'var(--text)'}}>
++            <strong>{pendingRateSessions} session{pendingRateSessions!==1?'s':''} used an estimated rate.</strong>
++            <div style={{marginTop:3,color:'var(--muted)',fontSize:'0.8rem',lineHeight:1.6}}>
++              Once the agent confirms the final rate, type it into the <strong style={{color:'var(--text)'}}>Rate</strong> column
++              below — revenue and payment figures update automatically.
++            </div>
++          </div>
++        </div>
++      )}
++
++      <div className="ch-card" style={{padding:0}}>
++        <div style={{padding:'14px 20px',borderBottom:'1px solid var(--border)',display:'flex',flexWrap:'wrap',gap:10,alignItems:'flex-end'}}>
++          <div style={{fontFamily:'var(--font-display)',fontSize:16,fontWeight:600,color:'var(--text)',marginRight:8,alignSelf:'center'}}>Rate &amp; Payments</div>
++
++          <div>
++            <div style={{fontSize:'0.72rem',color:'var(--muted)',marginBottom:3}}>AGENT</div>
++            <select className="ch-input" style={{minWidth:130}} value={fAgent} onChange={e=>setFAgent(e.target.value)}>
++              <option value="all">All Agents</option>
++              {[...new Set(harvest.map(e=>e.agent).filter(Boolean))].sort().map(a=><option key={a}>{a}</option>)}
++            </select>
++          </div>
++
++          <div>
++            <div style={{fontSize:'0.72rem',color:'var(--muted)',marginBottom:3}}>WORKER</div>
++            <select className="ch-input" style={{minWidth:130}} value={fWorker} onChange={e=>setFWorker(e.target.value)}>
++              <option value="all">All Workers</option>
++              {[...new Set(harvest.map(e=>e.worker).filter(Boolean))].sort().map(w=><option key={w}>{w}</option>)}
++            </select>
++          </div>
++
++          {hasFilter && (
++            <button className="ch-btn ch-btn-ghost ch-btn-sm" onClick={clearFilters} style={{alignSelf:'flex-end'}}>
++              ✕ Clear
++            </button>
++          )}
++
++          <div style={{marginLeft:'auto',alignSelf:'center',fontSize:'0.8rem',color:'var(--muted)'}}>
++            {rows.length} entries
++          </div>
++        </div>
++
++        <div style={{overflowX:'auto'}}>
++          <table className="ch-table ch-ratepay-table">
++            <thead>
++              <tr>
++                <th>Date</th><th>Worker</th><th>Agent</th>
++                <th>Worker pay</th><th>Advance</th><th>Worker Payment</th>
++                <th>Rate</th><th>Agent rev</th><th>Agent Payment</th>
++              </tr>
++            </thead>
++            <tbody>
++              {rows.length===0&&(
++                <tr><td colSpan={9} style={{textAlign:'center',padding:40,color:'var(--muted)'}}>
++                  No matching entries.
++                </td></tr>
++              )}
++              {rows.map(e=>{
++                const advance = advanceAsOf(e.worker, e.date);
++                return (
++                  <tr key={e.id}>
++                    <td>{e.date}</td><td>{e.worker}</td><td>{e.agent}</td>
++                    <td style={{color:'var(--success)'}}>{inr(e.workerPay||0)}</td>
++                    <td>{advance>0 ? <span className="ch-badge ch-badge-gold" title="Pending advance as of this session's date">−{inr(advance)}</span> : <span style={{color:'var(--muted)'}}>—</span>}</td>
++                    <td><EditablePayCell id={e.id} paidAmount={e.workerPayAmount} paidDate={e.workerPayDate} total={e.workerPay} onUpdate={onUpdateWorkerPay} advance={advance} onMarkPaidWithAdvance={()=>onPayWorkerNetOfAdvance(e.id)} onMarkPaidFull={()=>onPayWorkerFull(e.id)}/></td>
++                    <td><EditableRateCell id={e.id} rate={e.rate} rateStatus={e.rateStatus} onUpdateRate={onUpdateRate}/></td>
++                    <td style={{fontFamily:'var(--font-mono)'}}>₹{(e.agentRev||0).toFixed(1)}</td>
++                    <td><EditablePayCell id={e.id} paidAmount={e.agentPayAmount} paidDate={e.agentPayDate} total={e.agentRev} onUpdate={onUpdateAgentPay}/></td>
++                  </tr>
++                );
++              })}
++              {rows.length>0&&(
++                <tr style={{background:'var(--surface2)',fontWeight:600}}>
++                  <td colSpan={3} style={{textAlign:'right',color:'var(--muted)'}}>Totals</td>
++                  <td style={{color:'var(--success)'}}>{inr(rows.reduce((s,e)=>s+(e.workerPay||0),0))}</td>
++                  <td></td>
++                  <td></td>
++                  <td></td>
++                  <td style={{fontFamily:'var(--font-mono)'}}>₹{rows.reduce((s,e)=>s+(e.agentRev||0),0).toFixed(1)}</td>
++                  <td></td>
++                </tr>
++              )}
++            </tbody>
++          </table>
++        </div>
++      </div>
++
++      <div style={{marginTop:8,fontSize:'0.72rem',color:'var(--muted)',display:'flex',alignItems:'center',gap:5}}>
++        <span>💸</span> Advance shows what was pending as of that session's date. <strong>Net</strong> pays the balance after deducting it (and clears the advance); <strong>Full</strong> pays the whole amount and leaves the advance for later.
++      </div>
++    </div>
++  );
++}
+diff --git a/src/pages/tea/SettleModals.js b/src/pages/tea/SettleModals.js
+index 626f051..dd13a6f 100644
+--- a/src/pages/tea/SettleModals.js
++++ b/src/pages/tea/SettleModals.js
+@@ -76,7 +76,7 @@ export function WorkerSettleModal({open,worker,defaultAmount,isFloat,harvest,set
+   );
+ }
+ 
+-export function AgentPayModal({open,agentList,harvest,agentPayments,onClose,onSave,editPayment,onUpdate}){
++export function AgentPayModal({open,agentList,harvest,agentPayments,onClose,onSave,editPayment,onUpdate,defaultAgent}){
+   const agents=agentList;
+   const [agent,setAgent]=useState(agents[0]||'');
+   const [amount,setAmount]=useState('');
+@@ -93,10 +93,10 @@ export function AgentPayModal({open,agentList,harvest,agentPayments,onClose,onSa
+         setMethod(editPayment.method||'Cash');
+         setNotes(editPayment.notes||'');
+       } else {
+-        setAgent(agents[0]||'');setAmount('');setDate(todayStr());setMethod('Cash');setNotes('');
++        setAgent(defaultAgent||agents[0]||'');setAmount('');setDate(todayStr());setMethod('Cash');setNotes('');
+       }
+     }
+-  },[open,editPayment]); // eslint-disable-line
++  },[open,editPayment,defaultAgent]); // eslint-disable-line
+   const breakdown=agentPendingBreakdown(harvest,agentPayments);
+   const bd=breakdown.find(x=>x.agent===agent);
+   const save=async()=>{
+diff --git a/src/pages/tea/SettlementsTab.js b/src/pages/tea/SettlementsTab.js
+index 2085449..b284c33 100644
+--- a/src/pages/tea/SettlementsTab.js
++++ b/src/pages/tea/SettlementsTab.js
+@@ -1,27 +1,41 @@
+ import React,{useState} from 'react';
+ import { useMobile } from '../../hooks/useMobile';
+-import {inr,agentPendingBreakdown} from '../../utils/chaayaService';
++import {inr,agentPendingBreakdown,workerWageSummary,workerPaymentLog,agentPaymentLog} from '../../utils/chaayaService';
+ import {C} from './chaayaStyles';
+ 
+ export default function SettlementsTab({
+-  isAdmin,harvest,settlements,advances,agentPayments,workerList,
+-  onWorkerPay,onAgentPay,onDeleteSettlement,onEditSettlement,onDeleteAgentPayment,onEditAgentPayment,
++  harvest,settlements,advances,agentPayments,workerList,
++  onDeleteSettlement,onResetWorkerLog,onDeleteAgentPayment,onResetAgentLog,
++  forceView, // optional: 'workers' | 'agents' — when set, the internal sub-nav is hidden and only that view renders (used when embedded inside the Harvest Log hub, which provides its own nav)
+ }){
+   const isMobile = useMobile();
+-  const [stab,setStab]=useState('workers');
++  const [stabInternal,setStabInternal]=useState('workers');
++  const stab = forceView || stabInternal;
++  const setStab = setStabInternal;
+   const [settleView,setSettleView]=useState('week');
+   const agentBreakdown=agentPendingBreakdown(harvest,agentPayments);
+   const totalPending=agentBreakdown.reduce((s,x)=>s+x.pending,0);
+   const allAgents=[...new Set([...harvest.map(h=>h.agent),...agentPayments.map(p=>p.agent)].filter(Boolean))];
++  // Inline per-row payments (from Harvest Log), aggregated to one entry per
++  // person+date — merged alongside the lump-sum settlement/payment records
++  // recorded from this tab, so the history shows everything.
++  const workerLog=workerPaymentLog(harvest);
++  const agentLog=agentPaymentLog(harvest);
+ 
+   return(
+     <div>
+-      <div className="ch-tabs">
+-        {[['workers','Worker Wages'],['agents','Agent Payments']].map(([k,l])=>(
+-          <button key={k} className={`ch-tab ${stab===k?'active':''}`} onClick={()=>setStab(k)}>{l}</button>
+-        ))}
++      <div className="ch-alert-info" style={{marginBottom:16}}>
++        ℹ️ This log is derived from Harvest Log — to add or edit a payment, go to the <strong>Rate &amp; Payments</strong> tab. You can still delete/undo entries here if something needs correcting.
+       </div>
+ 
++      {!forceView && (
++        <div className="ch-tabs">
++          {[['workers','Worker Wages'],['agents','Agent Payments']].map(([k,l])=>(
++            <button key={k} className={`ch-tab ${stab===k?'active':''}`} onClick={()=>setStab(k)}>{l}</button>
++          ))}
++        </div>
++      )}
++
+       {stab==='workers'&&(
+         <div>
+           <div className="ch-pending-panel">
+@@ -63,54 +77,74 @@ export default function SettlementsTab({
+             })}
+           </div>
+ 
+-          {/* Worker cards */}
++          {/* Worker cards — Total earned, less pending advances (clearly
++              differentiated), less already paid, equals what's actually
++              remaining to pay this worker. */}
+           <div className="ch-grid-2">
+             {workerList.map(w=>{
+-              const totalEarned=harvest.filter(e=>e.worker===w).reduce((s,e)=>s+(e.workerPay||0),0);
+-              const pendingAdv=advances.filter(a=>a.worker===w&&!a.deducted).reduce((s,a)=>s+(a.amount||0),0);
+-              const paid=settlements.filter(s=>s.worker===w).reduce((s,x)=>s+(x.netPaid||0),0);
+-              const outstanding=Math.max(0,totalEarned-pendingAdv-paid);
++              const {totalEarned,pendingAdv,paid,outstanding}=workerWageSummary(w,harvest,advances,settlements);
++              const workerAdvances=advances.filter(a=>a.worker===w&&!a.deducted);
+               return(
+                 <div key={w} className="ch-card">
+                   <div className="ch-card-title">{w}</div>
+-                  {[['Total Harvest Wages',inr(totalEarned),C.leaf],['Pending Advances',`−${inr(pendingAdv)}`,C.rust],['Previously Settled',`−${inr(paid)}`,C.muted]].map(([l,v,c])=>(
+-                    <div key={l} className="ch-settle-row">
+-                      <div style={{color:'var(--muted)'}}>{l}</div>
+-                      <div style={{fontSize:13,color:c}}>{v}</div>
+-                    </div>
+-                  ))}
+-                  <div className="ch-total-row">
+-                    <span style={{fontSize:12.5,fontWeight:500,color:'var(--muted)'}}>Outstanding Now</span>
+-                    <span style={{fontSize:15,fontWeight:500,color:outstanding>0?C.leaf:C.faint}}>{inr(outstanding)}</span>
++                  <div className="ch-settle-row">
++                    <div style={{color:'var(--muted)'}}>Total Harvest Wages</div>
++                    <div style={{fontSize:13,color:C.leaf}}>{inr(totalEarned)}</div>
+                   </div>
+-                  {isAdmin&&(
+-                    <div style={{display:'flex',gap:8,marginTop:12,flexWrap:'wrap'}}>
+-                      <button className="ch-btn ch-btn-primary ch-btn-sm" onClick={()=>onWorkerPay(w,outstanding,false)} disabled={outstanding<=0}>Pay Worker</button>
+-                      <button className="ch-btn ch-btn-secondary ch-btn-sm" onClick={()=>onWorkerPay(w,outstanding,true)} disabled={outstanding<=0} title="Pay before agent has paid you">Pay Now (Float)</button>
++                  {pendingAdv>0 && (
++                    <div style={{background:'rgba(201,168,76,.1)',border:'1px solid rgba(201,148,26,.3)',borderRadius:6,padding:'6px 9px',margin:'4px 0'}}>
++                      <div className="ch-settle-row" style={{marginBottom:0}}>
++                        <div style={{color:'var(--accent)',fontWeight:600,display:'flex',alignItems:'center',gap:5}}>
++                          💸 Advance Deducted <span className="ch-badge ch-badge-gold">Advance</span>
++                        </div>
++                        <div style={{fontSize:13,color:'var(--accent)',fontWeight:600}}>−{inr(pendingAdv)}</div>
++                      </div>
++                      <details style={{marginTop:4}}>
++                        <summary style={{cursor:'pointer',fontSize:11,color:'var(--muted)'}}>
++                          {workerAdvances.length} pending advance{workerAdvances.length!==1?'s':''} — click to see
++                        </summary>
++                        <ul style={{margin:'6px 0 0',paddingLeft:16,fontSize:11.5,color:'var(--muted)'}}>
++                          {workerAdvances.map(a=>(
++                            <li key={a.id}>{a.date} — {inr(a.amount)}{a.notes?` (${a.notes})`:''}</li>
++                          ))}
++                        </ul>
++                      </details>
+                     </div>
+                   )}
++                  <div className="ch-settle-row">
++                    <div style={{color:'var(--muted)'}}>Already Paid</div>
++                    <div style={{fontSize:13,color:'var(--muted)'}}>−{inr(paid)}</div>
++                  </div>
++                  <div className="ch-total-row">
++                    <span style={{fontSize:12.5,fontWeight:500,color:'var(--muted)'}}>Remaining Payment Due</span>
++                    <span style={{fontSize:15,fontWeight:700,color:outstanding>0?C.leaf:C.faint}}>{inr(outstanding)}</span>
++                  </div>
+                 </div>
+               );
+             })}
+           </div>
+ 
+-          {settlements.length>0&&(
++          {(settlements.length>0||workerLog.length>0)&&(
+             <div className="ch-card" style={{padding:0}}>
+-              <div style={{padding:'14px 20px 0',fontSize:16,fontWeight:600,color:'var(--text)'}}>Settlement History</div>
++              <div style={{padding:'14px 20px 0',fontSize:16,fontWeight:600,color:'var(--text)'}}>Payment History</div>
+               <table className="ch-table">
+-                <thead><tr><th>Date</th><th>Worker</th><th>Amount</th><th>Notes</th>{isAdmin&&<th></th>}</tr></thead>
++                <thead><tr><th>Date</th><th>Worker</th><th>Amount</th><th>Source</th><th>Notes</th><th></th></tr></thead>
+                 <tbody>
+-                  {[...settlements].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(s=>(
+-                    <tr key={s.id}>
+-                      <td>{s.date}</td><td>{s.worker}</td>
+-                      <td style={{color:'var(--success)'}}>{inr(s.netPaid)}</td>
+-                      <td style={{color:'var(--muted)',fontSize:12}}>{s.notes||'—'}</td>
+-                      {isAdmin&&<td>
+-                        <div style={{display:'flex',gap:4}}>
+-                          <button className="ch-btn ch-btn-edit ch-btn-xs" onClick={()=>onEditSettlement(s)}>Edit</button>
+-                          <button className="ch-btn ch-btn-danger ch-btn-xs" onClick={()=>onDeleteSettlement(s.id)}>✕</button>
+-                        </div>
+-                      </td>}
++                  {[
++                    ...settlements.map(s=>({key:'s-'+s.id,date:s.date,worker:s.worker,amount:s.netPaid,notes:s.notes||'—',source:'Bulk payment',ref:s})),
++                    ...workerLog.map(w=>({key:'w-'+w.worker+'-'+w.date,date:w.date,worker:w.worker,amount:w.amount,notes:`${w.sessions} session${w.sessions!==1?'s':''}`,source:'Harvest Log',ref:null})),
++                  ].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(row=>(
++                    <tr key={row.key}>
++                      <td>{row.date}</td><td>{row.worker}</td>
++                      <td style={{color:'var(--success)'}}>{inr(row.amount)}</td>
++                      <td><span className={`ch-badge ${row.source==='Harvest Log'?'ch-badge-muted':'ch-badge-blue'}`}>{row.source}</span></td>
++                      <td style={{color:'var(--muted)',fontSize:12}}>{row.notes}</td>
++                      <td>
++                        {row.ref
++                          ? (onDeleteSettlement && <button className="ch-btn ch-btn-danger ch-btn-xs" onClick={()=>onDeleteSettlement(row.ref.id)}>✕ Delete</button>)
++                          : (onResetWorkerLog && <button className="ch-btn ch-btn-danger ch-btn-xs" onClick={()=>onResetWorkerLog(row.worker,row.date)}>↺ Undo</button>)
++                        }
++                      </td>
+                     </tr>
+                   ))}
+                 </tbody>
+@@ -122,13 +156,12 @@ export default function SettlementsTab({
+ 
+       {stab==='agents'&&(
+         <div>
+-          {isAdmin&&<div style={{marginBottom:18}}><button className="ch-btn ch-btn-primary" onClick={onAgentPay}>+ Record Agent Payment</button></div>}
+           <div className="ch-tabs" style={{marginBottom:16}}>
+             {[['week','By Agent'],['ytd','YTD'],['yoy','Year-on-Year']].map(([k,l])=>(
+               <button key={k} className={`ch-tab ${settleView===k?'active':''}`} onClick={()=>setSettleView(k)}>{l}</button>
+             ))}
+           </div>
+-          {settleView==='week'&&<AgentWeekView agentBreakdown={agentBreakdown} agentPayments={agentPayments} isAdmin={isAdmin} onDelete={onDeleteAgentPayment} onEdit={onEditAgentPayment}/>}
++          {settleView==='week'&&<AgentWeekView agentBreakdown={agentBreakdown} agentPayments={agentPayments} agentLog={agentLog} onDeleteAgentPayment={onDeleteAgentPayment} onResetAgentLog={onResetAgentLog}/>}
+           {settleView==='ytd'&&<AgentYTDView harvest={harvest} agentList={allAgents}/>}
+           {settleView==='yoy'&&<AgentYOYView harvest={harvest} agentList={[...new Set(harvest.map(h=>h.agent).filter(Boolean))]}/>}
+         </div>
+@@ -137,7 +170,7 @@ export default function SettlementsTab({
+   );
+ }
+ 
+-function AgentWeekView({agentBreakdown,agentPayments,isAdmin,onDelete,onEdit}){
++function AgentWeekView({agentBreakdown,agentPayments,agentLog,onDeleteAgentPayment,onResetAgentLog}){
+   return(
+     <div>
+       {agentBreakdown.map(x=>(
+@@ -151,24 +184,27 @@ function AgentWeekView({agentBreakdown,agentPayments,isAdmin,onDelete,onEdit}){
+           ))}
+         </div>
+       ))}
+-      {agentPayments.length>0&&(
++      {(agentPayments.length>0||agentLog.length>0)&&(
+         <div className="ch-card" style={{padding:0}}>
+           <div style={{padding:'14px 20px 0',fontSize:16,fontWeight:600,color:'var(--text)'}}>Payment History</div>
+           <table className="ch-table">
+-            <thead><tr><th>Date</th><th>Agent</th><th>Amount</th><th>Method</th><th>Notes</th>{isAdmin&&<th></th>}</tr></thead>
++            <thead><tr><th>Date</th><th>Agent</th><th>Amount</th><th>Source</th><th>Notes</th><th></th></tr></thead>
+             <tbody>
+-              {agentPayments.map(p=>(
+-                <tr key={p.id}>
+-                  <td>{p.date}</td><td>{p.agent}</td>
+-                  <td style={{color:'var(--success)'}}>{inr(p.amount)}</td>
+-                  <td><span className="ch-badge ch-badge-blue">{p.method||'Cash'}</span></td>
+-                  <td style={{color:'var(--muted)',fontSize:12}}>{p.notes||'—'}</td>
+-                  {isAdmin&&<td>
+-                    <div style={{display:'flex',gap:4}}>
+-                      <button className="ch-btn ch-btn-edit ch-btn-xs" onClick={()=>onEdit(p)}>Edit</button>
+-                      <button className="ch-btn ch-btn-danger ch-btn-xs" onClick={()=>onDelete(p.id)}>✕</button>
+-                    </div>
+-                  </td>}
++              {[
++                ...agentPayments.map(p=>({key:'p-'+p.id,date:p.date,agent:p.agent,amount:p.amount,notes:p.notes||'—',source:p.method||'Cash',ref:p})),
++                ...agentLog.map(a=>({key:'a-'+a.agent+'-'+a.date,date:a.date,agent:a.agent,amount:a.amount,notes:`${a.sessions} session${a.sessions!==1?'s':''}`,source:'Harvest Log',ref:null})),
++              ].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(row=>(
++                <tr key={row.key}>
++                  <td>{row.date}</td><td>{row.agent}</td>
++                  <td style={{color:'var(--success)'}}>{inr(row.amount)}</td>
++                  <td><span className={`ch-badge ${row.source==='Harvest Log'?'ch-badge-muted':'ch-badge-blue'}`}>{row.source}</span></td>
++                  <td style={{color:'var(--muted)',fontSize:12}}>{row.notes}</td>
++                  <td>
++                    {row.ref
++                      ? (onDeleteAgentPayment && <button className="ch-btn ch-btn-danger ch-btn-xs" onClick={()=>onDeleteAgentPayment(row.ref.id)}>✕ Delete</button>)
++                      : (onResetAgentLog && <button className="ch-btn ch-btn-danger ch-btn-xs" onClick={()=>onResetAgentLog(row.agent,row.date)}>↺ Undo</button>)
++                    }
++                  </td>
+                 </tr>
+               ))}
+             </tbody>
+diff --git a/src/pages/tea/chaayaStyles.js b/src/pages/tea/chaayaStyles.js
+index 0b2860c..16cf209 100644
+--- a/src/pages/tea/chaayaStyles.js
++++ b/src/pages/tea/chaayaStyles.js
+@@ -3,17 +3,24 @@
+ 
+ export const TABS = [
+   { key: 'dashboard',       label: '⌂ Dashboard' },
+-  { key: 'harvest',         label: '❧ Log Harvest' },
+-  { key: 'settlements',     label: '₹ Settlements' },
++  { key: 'harvest',         label: '❧ Harvest Log' },
+   { key: 'advances',        label: '⇄ Advances' },
+   { key: 'maintenance',     label: '⚙ Maintenance' },
+-  { key: 'rates',           label: '◇ Market Rates' },
+   { key: 'analytics',       label: '◎ Analytics' },
+   { key: 'agent_analytics', label: '⚖ Agent Analytics' },
+   { key: 'people',          label: '◉ People & Fields' },
+   { key: 'weather',         label: '☁ Weather' },
+ ];
+ 
++// Sub-tabs inside the consolidated "Harvest Log" tab.
++export const HARVEST_SUBTABS = [
++  { key: 'log',     label: 'Log Harvest' },
++  { key: 'ratepay', label: 'Rate & Payments' },
++  { key: 'rates',   label: 'Market Rates' },
++  { key: 'worker',  label: 'Worker Payments' },
++  { key: 'agent',   label: 'Agent Payments' },
++];
++
+ export const PERIOD_OPTS = [
+   { key: 'this_month', label: 'This Month' },
+   { key: 'last_month', label: 'Last Month' },
+diff --git a/src/styles/global.css b/src/styles/global.css
+index 60acd7b..3623ff1 100644
+--- a/src/styles/global.css
++++ b/src/styles/global.css
+@@ -665,6 +665,78 @@ textarea { resize: vertical; min-height: 80px; }
+ .ch-table tr:last-child td { border-bottom:none; }
+ .ch-table tbody tr:hover td { background: var(--surface2); }
+ 
++/* Pin the actions column (Edit/Delete) to the right so it stays reachable
++   on wide tables that need horizontal scrolling — e.g. the Harvest Log. */
++.ch-sticky-actions-th, .ch-sticky-actions-td {
++  position: sticky;
++  right: 0;
++  background: var(--surface);
++  box-shadow: -6px 0 8px -6px rgba(0,0,0,0.15);
++  z-index: 1;
++}
++.ch-table tbody tr:hover .ch-sticky-actions-td { background: var(--surface2); }
++
++/* Harvest Log tables — every column shares one font size so nothing looks
++   misaligned column-to-column. */
++.ch-harvest-table, .ch-harvest-table th, .ch-harvest-table td {
++  font-size: 0.85rem;
++}
++.ch-harvest-table th, .ch-harvest-table td {
++  padding: 9px 12px;
++  white-space: nowrap;
++}
++.ch-harvest-table td { font-family: var(--font-mono); }
++
++/* Shared layout for the inline-editable Rate / Worker Payment / Agent
++   Payment cells — one row, consistent sizing, no wrapping. */
++.ch-inline-pay-cell {
++  display: flex;
++  align-items: center;
++  gap: 4px;
++  white-space: nowrap;
++  font-size: 0.85rem;
++}
++.ch-inline-input {
++  font-family: var(--font-mono);
++  font-size: 0.85rem;
++  padding: 3px 6px;
++  border: 1px solid var(--border);
++  border-radius: 5px;
++  background: var(--surface);
++  color: var(--text);
++}
++.ch-inline-input-amt { width: 56px; text-align: right; }
++.ch-inline-input-date { width: 122px; color: var(--muted); }
++.ch-inline-tick {
++  font-size: 0.85rem;
++  line-height: 1;
++  background: var(--surface2);
++  border: 1px solid var(--border);
++  border-radius: 5px;
++  color: var(--success);
++  cursor: pointer;
++  padding: 3px 7px;
++  flex-shrink: 0;
++}
++.ch-inline-tick:disabled { color: var(--muted); cursor: default; }
++.ch-inline-undo { color: var(--warn); }
++
++/* Rate & Payments tab — tighter than the Intake table, since every row has
++   several interactive input cells and needs to fit without zooming out. */
++.ch-ratepay-table, .ch-ratepay-table th, .ch-ratepay-table td {
++  font-size: 0.9rem;
++}
++.ch-ratepay-table th, .ch-ratepay-table td {
++  padding: 9px 11px;
++  white-space: nowrap;
++}
++.ch-ratepay-table td { font-family: var(--font-mono); }
++.ch-ratepay-table .ch-inline-pay-cell { font-size: 0.9rem; gap: 5px; }
++.ch-ratepay-table .ch-inline-input { font-size: 0.9rem; padding: 4px 7px; }
++.ch-ratepay-table .ch-inline-input-amt { width: 68px; }
++.ch-ratepay-table .ch-inline-input-date { width: 130px; }
++.ch-ratepay-table .ch-inline-tick { font-size: 0.78rem; padding: 4px 8px; white-space: nowrap; }
++
+ /* Forms — match global inputs */
+ .ch-form-group { display:flex; flex-direction:column; gap:5px; margin-bottom:16px; }
+ .ch-form-group label { font-size:0.78rem; font-weight:500; color:var(--muted); }
+diff --git a/src/utils/chaayaService.js b/src/utils/chaayaService.js
+index 657fdbd..610b514 100644
+--- a/src/utils/chaayaService.js
++++ b/src/utils/chaayaService.js
+@@ -245,28 +245,224 @@ export function agentStats(agent, harvestData) {
+   };
+ }
+ 
+-export function workerUnpaidWages(workerName, harvest, advances, settlements) {
+-  const totalEarned = harvest.filter(e => e.worker === workerName).reduce((s, e) => s + (e.workerPay || 0), 0);
++export function workerWageSummary(workerName, harvest, advances, settlements) {
++  const enriched = enrichHarvestWithPaymentStatus(harvest, settlements, []);
++  const rows = enriched.filter(e => e.worker === workerName);
++  const totalEarned = rows.reduce((s, e) => s + (e.workerPay || 0), 0);
++  const paid        = rows.reduce((s, e) => s + (e.workerPayAmount || 0), 0);
+   const pendingAdv  = advances.filter(a => a.worker === workerName && !a.deducted).reduce((s, a) => s + (a.amount || 0), 0);
+-  const paid        = settlements.filter(s => s.worker === workerName).reduce((s, x) => s + (x.netPaid || 0), 0);
+-  return Math.max(0, totalEarned - pendingAdv - paid);
++  const outstanding = Math.max(0, totalEarned - pendingAdv - paid);
++  return { totalEarned, pendingAdv, paid, outstanding };
++}
++
++export function workerUnpaidWages(workerName, harvest, advances, settlements) {
++  return workerWageSummary(workerName, harvest, advances, settlements).outstanding;
+ }
+ 
+ export function agentPendingBreakdown(harvest, agentPayments) {
++  const enriched = enrichHarvestWithPaymentStatus(harvest, [], agentPayments);
+   const harvestAgents  = [...new Set(harvest.map(h => h.agent).filter(Boolean))];
+   const paymentAgents  = [...new Set(agentPayments.map(p => p.agent).filter(Boolean))];
+   const allAgents = [...new Set([...harvestAgents, ...paymentAgents])];
+   return allAgents.map(a => {
+-    const hEntries = harvest.filter(e => e.agent === a);
++    const hEntries = enriched.filter(e => e.agent === a);
+     const earned   = hEntries.reduce((s, e) => s + (e.agentRev || 0), 0);
+     const totalKg  = hEntries.reduce((s, e) => s + (e.tNet || 0), 0);
+     const sessions = hEntries.length;
+-    const received = agentPayments.filter(p => p.agent === a).reduce((s, p) => s + (p.amount || 0), 0);
++    const received = hEntries.reduce((s, e) => s + (e.agentPayAmount || 0), 0);
+     const avgRate  = totalKg > 0 ? earned / totalKg : 0;
+     return { agent: a, earned, received, pending: Math.max(0, earned - received), totalKg, sessions, avgRate };
+   }).filter(x => x.earned > 0 || x.received > 0);
+ }
+ 
++// One row per (worker, date) — aggregates inline per-row payments recorded
++// directly in Harvest Log into a single transaction entry, since several
++// harvest sessions paid on the same day are really one payment event.
++export function workerPaymentLog(harvest) {
++  const map = {};
++  harvest.forEach(h => {
++    if (!h.worker || !(h.workerPayAmount > 0) || !h.workerPayDate) return;
++    const key = h.worker + '|' + h.workerPayDate;
++    if (!map[key]) map[key] = { worker: h.worker, date: h.workerPayDate, amount: 0, sessions: 0 };
++    map[key].amount += h.workerPayAmount;
++    map[key].sessions += 1;
++  });
++  return Object.values(map).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
++}
++
++export function agentPaymentLog(harvest) {
++  const map = {};
++  harvest.forEach(h => {
++    if (!h.agent || !(h.agentPayAmount > 0) || !h.agentPayDate) return;
++    const key = h.agent + '|' + h.agentPayDate;
++    if (!map[key]) map[key] = { agent: h.agent, date: h.agentPayDate, amount: 0, sessions: 0 };
++    map[key].amount += h.agentPayAmount;
++    map[key].sessions += 1;
++  });
++  return Object.values(map).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
++}
++
++// Applies `amount` toward a worker's pending (undeducted) advances, oldest
++// first. Fully-consumed advances are marked deducted; a partially-consumed
++// advance has its remaining amount reduced and stays pending.
++export async function consumeWorkerAdvance(advances, worker, amount) {
++  let remaining = amount;
++  const pending = advances
++    .filter(a => a.worker === worker && !a.deducted)
++    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
++  for (const a of pending) {
++    if (remaining <= 0.01) break;
++    if ((a.amount || 0) <= remaining + 0.01) {
++      await advanceService.update(a.id, { deducted: true });
++      remaining -= (a.amount || 0);
++    } else {
++      await advanceService.update(a.id, { amount: parseFloat(((a.amount || 0) - remaining).toFixed(2)) });
++      remaining = 0;
++    }
++  }
++}
++
++export function lastKnownRate(harvest, agent) {
++  if (!agent) return null;
++  const rows = harvest
++    .filter(h => h.agent === agent && h.rate > 0)
++    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
++  return rows.length ? rows[0].rate : null;
++}
++
++// Cost-per-kg breakdown: how much of the per-kg revenue is consumed by
++// bag/water deduction loss, worker wages, and field maintenance — both in
++// aggregate and broken down by individual maintenance task (fertilizer,
++// pruning, etc.) — leaving the actual net margin per kg harvested.
++export function costPerKgBreakdown(harvest, maintenance) {
++  const totalNetKg     = harvest.reduce((s,h)=>s+(h.tNet||0),0);
++  const totalGrossKg   = harvest.reduce((s,h)=>s+(h.tGross||0),0);
++  const totalBagDed    = harvest.reduce((s,h)=>s+(h.tBagDed||0),0);
++  const totalWaterDed  = harvest.reduce((s,h)=>s+(h.tWaterDed||0),0);
++  const totalDeductedKg = totalBagDed + totalWaterDed;
++  const totalAgentRev  = harvest.reduce((s,h)=>s+(h.agentRev||0),0);
++  const totalWorkerPay = harvest.reduce((s,h)=>s+(h.workerPay||0),0);
++  const avgRate = totalNetKg > 0 ? totalAgentRev / totalNetKg : 0;
++
++  // Value of the weight lost to bag/water deductions, at the average rate —
++  // revenue that was never counted because it was deducted before "net"
++  // weight was calculated, expressed per net kg actually sold.
++  const deductionLossValue = totalDeductedKg * avgRate;
++  const deductionLossPerKg = totalNetKg > 0 ? deductionLossValue / totalNetKg : 0;
++
++  const workerPerKg = totalNetKg > 0 ? totalWorkerPay / totalNetKg : 0;
++
++  const totalMaintenance = maintenance.reduce((s,m)=>s+(m.cost||0),0);
++  const maintenancePerKg = totalNetKg > 0 ? totalMaintenance / totalNetKg : 0;
++
++  const byTask = {};
++  maintenance.forEach(m => { const t = m.task || 'Other'; byTask[t] = (byTask[t]||0) + (m.cost||0); });
++  const taskBreakdown = Object.entries(byTask)
++    .map(([task,cost]) => ({ task, cost, perKg: totalNetKg > 0 ? cost/totalNetKg : 0 }))
++    .sort((a,b) => b.cost - a.cost);
++
++  const netMarginPerKg = avgRate - deductionLossPerKg - workerPerKg - maintenancePerKg;
++
++  return {
++    totalNetKg, totalGrossKg, totalDeductedKg, avgRate,
++    deductionLossValue, deductionLossPerKg,
++    totalWorkerPay, workerPerKg,
++    totalMaintenance, maintenancePerKg, taskBreakdown,
++    netMarginPerKg,
++  };
++}
++
++export function agentRateLog(harvest) {
++  const map = {};
++  harvest.forEach(h => {
++    if (!h.agent || !h.rate) return;
++    const key = h.agent + '|' + h.rate;
++    if (!map[key]) map[key] = { agent: h.agent, rate: h.rate, from: h.date, to: h.date, sessions: 0, netKg: 0, confirmed: h.rateStatus === 'confirmed' };
++    map[key].sessions += 1;
++    map[key].netKg += h.tNet || 0;
++    if (!map[key].from || h.date < map[key].from) map[key].from = h.date;
++    if (!map[key].to   || h.date > map[key].to)   map[key].to   = h.date;
++    if (h.rateStatus === 'confirmed') map[key].confirmed = true;
++  });
++  return Object.values(map).sort((a, b) => (b.to || '').localeCompare(a.to || ''));
++}
++
++// Payment status per harvest row (auto-derived, nothing extra to store) ──
++// Settlements/agent payments are recorded as lump sums (e.g. one payment
++// covering several harvest sessions). This allocates each lump payment
++// against the underlying sessions oldest-first (FIFO) so every harvest row
++// can show its own paid amount / status / the date it was covered.
++function fifoAllocate(rows, payments, rowAmountField, paymentAmountField, paymentDateField) {
++  const sortedRows = [...rows].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
++  const sortedPayments = [...payments]
++    .filter(p => (p[paymentAmountField] || 0) > 0)
++    .sort((a, b) => (a[paymentDateField] || '').localeCompare(b[paymentDateField] || ''));
++
++  let payIdx = 0, remaining = 0, currentDate = null;
++  const result = {};
++  for (const row of sortedRows) {
++    let need = row[rowAmountField] || 0;
++    let paid = 0, lastDate = null;
++    while (need > 0.01) {
++      if (remaining <= 0.01) {
++        if (payIdx >= sortedPayments.length) break;
++        remaining = sortedPayments[payIdx][paymentAmountField] || 0;
++        currentDate = sortedPayments[payIdx][paymentDateField] || null;
++        payIdx++;
++      }
++      const take = Math.min(need, remaining);
++      paid += take; remaining -= take; need -= take;
++      lastDate = currentDate;
++    }
++    const total = row[rowAmountField] || 0;
++    const status = total <= 0 ? 'n/a' : paid >= total - 0.01 ? 'paid' : paid > 0 ? 'partial' : 'pending';
++    result[row.id] = { paidAmount: paid, status, date: lastDate };
++  }
++  return result;
++}
++
++// Groups rows/payments by a key (worker or agent name) before allocating,
++// so payments only settle sessions for the same person.
++function fifoAllocateGrouped(rows, payments, groupField, rowAmountField, paymentGroupField, paymentAmountField, paymentDateField) {
++  const groups = [...new Set(rows.map(r => r[groupField]).filter(Boolean))];
++  let out = {};
++  groups.forEach(g => {
++    const gRows = rows.filter(r => r[groupField] === g);
++    const gPayments = payments.filter(p => p[paymentGroupField] === g);
++    out = { ...out, ...fifoAllocate(gRows, gPayments, rowAmountField, paymentAmountField, paymentDateField) };
++  });
++  return out;
++}
++
++// Returns harvest array with workerPay*/agentPay* status fields merged in.
++// If a row has been edited directly (workerPayAmount / agentPayAmount set
++// explicitly, e.g. via the inline cell in Log Harvest), that value wins.
++// Otherwise it falls back to the FIFO allocation of lump-sum settlements /
++// agent payments, so bulk "pay the whole week at once" recording still works.
++export function enrichHarvestWithPaymentStatus(harvest, settlements, agentPayments) {
++  // Rows with an explicit inline override must NOT consume any of the legacy
++  // bulk-payment pool — otherwise that money gets "spent" on a row whose
++  // answer we discard anyway, leaving less for the rows that actually rely
++  // on FIFO allocation and throwing off everyone else's totals.
++  const workerFifoRows = harvest.filter(h => h.workerPayAmount == null);
++  const agentFifoRows  = harvest.filter(h => h.agentPayAmount  == null);
++  const workerAlloc = fifoAllocateGrouped(workerFifoRows, settlements, 'worker', 'workerPay', 'worker', 'netPaid', 'date');
++  const agentAlloc   = fifoAllocateGrouped(agentFifoRows, agentPayments, 'agent', 'agentRev', 'agent', 'amount', 'date');
++  return harvest.map(h => {
++    const hasOwnWorker = h.workerPayAmount != null;
++    const hasOwnAgent  = h.agentPayAmount  != null;
++    const wLegacy = workerAlloc[h.id] || {};
++    const aLegacy = agentAlloc[h.id]  || {};
++    const workerPayAmount = hasOwnWorker ? h.workerPayAmount : (wLegacy.paidAmount || 0);
++    const agentPayAmount  = hasOwnAgent  ? h.agentPayAmount  : (aLegacy.paidAmount || 0);
++    const workerPayDate   = hasOwnWorker ? (h.workerPayDate || null) : (wLegacy.date || null);
++    const agentPayDate    = hasOwnAgent  ? (h.agentPayDate  || null) : (aLegacy.date || null);
++    const workerPayStatus = !h.workerPay ? 'n/a' : workerPayAmount >= h.workerPay - 0.5 ? 'paid' : workerPayAmount > 0 ? 'partial' : 'pending';
++    const agentPayStatus  = !h.agentRev  ? 'n/a' : agentPayAmount  >= h.agentRev - 0.5  ? 'paid' : agentPayAmount  > 0 ? 'partial' : 'pending';
++    return { ...h, workerPayAmount, workerPayDate, workerPayStatus, agentPayAmount, agentPayDate, agentPayStatus };
++  });
++}
++
+ // Tea Field Leases
+ export const leaseService = {
+   subscribe(cb) {

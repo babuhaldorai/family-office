@@ -3,15 +3,22 @@
 
 export const TABS = [
   { key: 'dashboard',       label: '⌂ Dashboard' },
-  { key: 'harvest',         label: '❧ Log Harvest' },
-  { key: 'settlements',     label: '₹ Settlements' },
+  { key: 'harvest',         label: '❧ Harvest Log' },
   { key: 'advances',        label: '⇄ Advances' },
   { key: 'maintenance',     label: '⚙ Maintenance' },
-  { key: 'rates',           label: '◇ Market Rates' },
   { key: 'analytics',       label: '◎ Analytics' },
   { key: 'agent_analytics', label: '⚖ Agent Analytics' },
   { key: 'people',          label: '◉ People & Fields' },
   { key: 'weather',         label: '☁ Weather' },
+];
+
+// Sub-tabs inside the consolidated "Harvest Log" tab.
+export const HARVEST_SUBTABS = [
+  { key: 'log',     label: 'Log Harvest' },
+  { key: 'ratepay', label: 'Rate & Payments' },
+  { key: 'rates',   label: 'Market Rates' },
+  { key: 'worker',  label: 'Worker Payments' },
+  { key: 'agent',   label: 'Agent Payments' },
 ];
 
 export const PERIOD_OPTS = [

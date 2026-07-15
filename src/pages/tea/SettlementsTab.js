@@ -1,26 +1,40 @@
 import React,{useState} from 'react';
 import { useMobile } from '../../hooks/useMobile';
-import {inr,agentPendingBreakdown} from '../../utils/chaayaService';
+import {inr,agentPendingBreakdown,workerWageSummary,workerPaymentLog,agentPaymentLog} from '../../utils/chaayaService';
 import {C} from './chaayaStyles';
 
 export default function SettlementsTab({
-  isAdmin,harvest,settlements,advances,agentPayments,workerList,
-  onWorkerPay,onAgentPay,onDeleteSettlement,onEditSettlement,onDeleteAgentPayment,onEditAgentPayment,
+  harvest,settlements,advances,agentPayments,workerList,
+  onDeleteSettlement,onResetWorkerLog,onDeleteAgentPayment,onResetAgentLog,
+  forceView, // optional: 'workers' | 'agents' — when set, the internal sub-nav is hidden and only that view renders (used when embedded inside the Harvest Log hub, which provides its own nav)
 }){
   const isMobile = useMobile();
-  const [stab,setStab]=useState('workers');
+  const [stabInternal,setStabInternal]=useState('workers');
+  const stab = forceView || stabInternal;
+  const setStab = setStabInternal;
   const [settleView,setSettleView]=useState('week');
   const agentBreakdown=agentPendingBreakdown(harvest,agentPayments);
   const totalPending=agentBreakdown.reduce((s,x)=>s+x.pending,0);
   const allAgents=[...new Set([...harvest.map(h=>h.agent),...agentPayments.map(p=>p.agent)].filter(Boolean))];
+  // Inline per-row payments (from Harvest Log), aggregated to one entry per
+  // person+date — merged alongside the lump-sum settlement/payment records
+  // recorded from this tab, so the history shows everything.
+  const workerLog=workerPaymentLog(harvest);
+  const agentLog=agentPaymentLog(harvest);
 
   return(
     <div>
-      <div className="ch-tabs">
-        {[['workers','Worker Wages'],['agents','Agent Payments']].map(([k,l])=>(
-          <button key={k} className={`ch-tab ${stab===k?'active':''}`} onClick={()=>setStab(k)}>{l}</button>
-        ))}
+      <div className="ch-alert-info" style={{marginBottom:16}}>
+        ℹ️ This log is derived from Harvest Log — to add or edit a payment, go to the <strong>Rate &amp; Payments</strong> tab. You can still delete/undo entries here if something needs correcting.
       </div>
+
+      {!forceView && (
+        <div className="ch-tabs">
+          {[['workers','Worker Wages'],['agents','Agent Payments']].map(([k,l])=>(
+            <button key={k} className={`ch-tab ${stab===k?'active':''}`} onClick={()=>setStab(k)}>{l}</button>
+          ))}
+        </div>
+      )}
 
       {stab==='workers'&&(
         <div>
@@ -63,54 +77,74 @@ export default function SettlementsTab({
             })}
           </div>
 
-          {/* Worker cards */}
+          {/* Worker cards — Total earned, less pending advances (clearly
+              differentiated), less already paid, equals what's actually
+              remaining to pay this worker. */}
           <div className="ch-grid-2">
             {workerList.map(w=>{
-              const totalEarned=harvest.filter(e=>e.worker===w).reduce((s,e)=>s+(e.workerPay||0),0);
-              const pendingAdv=advances.filter(a=>a.worker===w&&!a.deducted).reduce((s,a)=>s+(a.amount||0),0);
-              const paid=settlements.filter(s=>s.worker===w).reduce((s,x)=>s+(x.netPaid||0),0);
-              const outstanding=Math.max(0,totalEarned-pendingAdv-paid);
+              const {totalEarned,pendingAdv,paid,outstanding}=workerWageSummary(w,harvest,advances,settlements);
+              const workerAdvances=advances.filter(a=>a.worker===w&&!a.deducted);
               return(
                 <div key={w} className="ch-card">
                   <div className="ch-card-title">{w}</div>
-                  {[['Total Harvest Wages',inr(totalEarned),C.leaf],['Pending Advances',`−${inr(pendingAdv)}`,C.rust],['Previously Settled',`−${inr(paid)}`,C.muted]].map(([l,v,c])=>(
-                    <div key={l} className="ch-settle-row">
-                      <div style={{color:'var(--muted)'}}>{l}</div>
-                      <div style={{fontSize:13,color:c}}>{v}</div>
-                    </div>
-                  ))}
-                  <div className="ch-total-row">
-                    <span style={{fontSize:12.5,fontWeight:500,color:'var(--muted)'}}>Outstanding Now</span>
-                    <span style={{fontSize:15,fontWeight:500,color:outstanding>0?C.leaf:C.faint}}>{inr(outstanding)}</span>
+                  <div className="ch-settle-row">
+                    <div style={{color:'var(--muted)'}}>Total Harvest Wages</div>
+                    <div style={{fontSize:13,color:C.leaf}}>{inr(totalEarned)}</div>
                   </div>
-                  {isAdmin&&(
-                    <div style={{display:'flex',gap:8,marginTop:12,flexWrap:'wrap'}}>
-                      <button className="ch-btn ch-btn-primary ch-btn-sm" onClick={()=>onWorkerPay(w,outstanding,false)} disabled={outstanding<=0}>Pay Worker</button>
-                      <button className="ch-btn ch-btn-secondary ch-btn-sm" onClick={()=>onWorkerPay(w,outstanding,true)} disabled={outstanding<=0} title="Pay before agent has paid you">Pay Now (Float)</button>
+                  {pendingAdv>0 && (
+                    <div style={{background:'rgba(201,168,76,.1)',border:'1px solid rgba(201,148,26,.3)',borderRadius:6,padding:'6px 9px',margin:'4px 0'}}>
+                      <div className="ch-settle-row" style={{marginBottom:0}}>
+                        <div style={{color:'var(--accent)',fontWeight:600,display:'flex',alignItems:'center',gap:5}}>
+                          💸 Advance Deducted <span className="ch-badge ch-badge-gold">Advance</span>
+                        </div>
+                        <div style={{fontSize:13,color:'var(--accent)',fontWeight:600}}>−{inr(pendingAdv)}</div>
+                      </div>
+                      <details style={{marginTop:4}}>
+                        <summary style={{cursor:'pointer',fontSize:11,color:'var(--muted)'}}>
+                          {workerAdvances.length} pending advance{workerAdvances.length!==1?'s':''} — click to see
+                        </summary>
+                        <ul style={{margin:'6px 0 0',paddingLeft:16,fontSize:11.5,color:'var(--muted)'}}>
+                          {workerAdvances.map(a=>(
+                            <li key={a.id}>{a.date} — {inr(a.amount)}{a.notes?` (${a.notes})`:''}</li>
+                          ))}
+                        </ul>
+                      </details>
                     </div>
                   )}
+                  <div className="ch-settle-row">
+                    <div style={{color:'var(--muted)'}}>Already Paid</div>
+                    <div style={{fontSize:13,color:'var(--muted)'}}>−{inr(paid)}</div>
+                  </div>
+                  <div className="ch-total-row">
+                    <span style={{fontSize:12.5,fontWeight:500,color:'var(--muted)'}}>Remaining Payment Due</span>
+                    <span style={{fontSize:15,fontWeight:700,color:outstanding>0?C.leaf:C.faint}}>{inr(outstanding)}</span>
+                  </div>
                 </div>
               );
             })}
           </div>
 
-          {settlements.length>0&&(
+          {(settlements.length>0||workerLog.length>0)&&(
             <div className="ch-card" style={{padding:0}}>
-              <div style={{padding:'14px 20px 0',fontSize:16,fontWeight:600,color:'var(--text)'}}>Settlement History</div>
+              <div style={{padding:'14px 20px 0',fontSize:16,fontWeight:600,color:'var(--text)'}}>Payment History</div>
               <table className="ch-table">
-                <thead><tr><th>Date</th><th>Worker</th><th>Amount</th><th>Notes</th>{isAdmin&&<th></th>}</tr></thead>
+                <thead><tr><th>Date</th><th>Worker</th><th>Amount</th><th>Source</th><th>Notes</th><th></th></tr></thead>
                 <tbody>
-                  {[...settlements].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(s=>(
-                    <tr key={s.id}>
-                      <td>{s.date}</td><td>{s.worker}</td>
-                      <td style={{color:'var(--success)'}}>{inr(s.netPaid)}</td>
-                      <td style={{color:'var(--muted)',fontSize:12}}>{s.notes||'—'}</td>
-                      {isAdmin&&<td>
-                        <div style={{display:'flex',gap:4}}>
-                          <button className="ch-btn ch-btn-edit ch-btn-xs" onClick={()=>onEditSettlement(s)}>Edit</button>
-                          <button className="ch-btn ch-btn-danger ch-btn-xs" onClick={()=>onDeleteSettlement(s.id)}>✕</button>
-                        </div>
-                      </td>}
+                  {[
+                    ...settlements.map(s=>({key:'s-'+s.id,date:s.date,worker:s.worker,amount:s.netPaid,notes:s.notes||'—',source:'Bulk payment',ref:s})),
+                    ...workerLog.map(w=>({key:'w-'+w.worker+'-'+w.date,date:w.date,worker:w.worker,amount:w.amount,notes:`${w.sessions} session${w.sessions!==1?'s':''}`,source:'Harvest Log',ref:null})),
+                  ].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(row=>(
+                    <tr key={row.key}>
+                      <td>{row.date}</td><td>{row.worker}</td>
+                      <td style={{color:'var(--success)'}}>{inr(row.amount)}</td>
+                      <td><span className={`ch-badge ${row.source==='Harvest Log'?'ch-badge-muted':'ch-badge-blue'}`}>{row.source}</span></td>
+                      <td style={{color:'var(--muted)',fontSize:12}}>{row.notes}</td>
+                      <td>
+                        {row.ref
+                          ? (onDeleteSettlement && <button className="ch-btn ch-btn-danger ch-btn-xs" onClick={()=>onDeleteSettlement(row.ref.id)}>✕ Delete</button>)
+                          : (onResetWorkerLog && <button className="ch-btn ch-btn-danger ch-btn-xs" onClick={()=>onResetWorkerLog(row.worker,row.date)}>↺ Undo</button>)
+                        }
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -122,13 +156,12 @@ export default function SettlementsTab({
 
       {stab==='agents'&&(
         <div>
-          {isAdmin&&<div style={{marginBottom:18}}><button className="ch-btn ch-btn-primary" onClick={onAgentPay}>+ Record Agent Payment</button></div>}
           <div className="ch-tabs" style={{marginBottom:16}}>
             {[['week','By Agent'],['ytd','YTD'],['yoy','Year-on-Year']].map(([k,l])=>(
               <button key={k} className={`ch-tab ${settleView===k?'active':''}`} onClick={()=>setSettleView(k)}>{l}</button>
             ))}
           </div>
-          {settleView==='week'&&<AgentWeekView agentBreakdown={agentBreakdown} agentPayments={agentPayments} isAdmin={isAdmin} onDelete={onDeleteAgentPayment} onEdit={onEditAgentPayment}/>}
+          {settleView==='week'&&<AgentWeekView agentBreakdown={agentBreakdown} agentPayments={agentPayments} agentLog={agentLog} onDeleteAgentPayment={onDeleteAgentPayment} onResetAgentLog={onResetAgentLog}/>}
           {settleView==='ytd'&&<AgentYTDView harvest={harvest} agentList={allAgents}/>}
           {settleView==='yoy'&&<AgentYOYView harvest={harvest} agentList={[...new Set(harvest.map(h=>h.agent).filter(Boolean))]}/>}
         </div>
@@ -137,7 +170,7 @@ export default function SettlementsTab({
   );
 }
 
-function AgentWeekView({agentBreakdown,agentPayments,isAdmin,onDelete,onEdit}){
+function AgentWeekView({agentBreakdown,agentPayments,agentLog,onDeleteAgentPayment,onResetAgentLog}){
   return(
     <div>
       {agentBreakdown.map(x=>(
@@ -151,24 +184,27 @@ function AgentWeekView({agentBreakdown,agentPayments,isAdmin,onDelete,onEdit}){
           ))}
         </div>
       ))}
-      {agentPayments.length>0&&(
+      {(agentPayments.length>0||agentLog.length>0)&&(
         <div className="ch-card" style={{padding:0}}>
           <div style={{padding:'14px 20px 0',fontSize:16,fontWeight:600,color:'var(--text)'}}>Payment History</div>
           <table className="ch-table">
-            <thead><tr><th>Date</th><th>Agent</th><th>Amount</th><th>Method</th><th>Notes</th>{isAdmin&&<th></th>}</tr></thead>
+            <thead><tr><th>Date</th><th>Agent</th><th>Amount</th><th>Source</th><th>Notes</th><th></th></tr></thead>
             <tbody>
-              {agentPayments.map(p=>(
-                <tr key={p.id}>
-                  <td>{p.date}</td><td>{p.agent}</td>
-                  <td style={{color:'var(--success)'}}>{inr(p.amount)}</td>
-                  <td><span className="ch-badge ch-badge-blue">{p.method||'Cash'}</span></td>
-                  <td style={{color:'var(--muted)',fontSize:12}}>{p.notes||'—'}</td>
-                  {isAdmin&&<td>
-                    <div style={{display:'flex',gap:4}}>
-                      <button className="ch-btn ch-btn-edit ch-btn-xs" onClick={()=>onEdit(p)}>Edit</button>
-                      <button className="ch-btn ch-btn-danger ch-btn-xs" onClick={()=>onDelete(p.id)}>✕</button>
-                    </div>
-                  </td>}
+              {[
+                ...agentPayments.map(p=>({key:'p-'+p.id,date:p.date,agent:p.agent,amount:p.amount,notes:p.notes||'—',source:p.method||'Cash',ref:p})),
+                ...agentLog.map(a=>({key:'a-'+a.agent+'-'+a.date,date:a.date,agent:a.agent,amount:a.amount,notes:`${a.sessions} session${a.sessions!==1?'s':''}`,source:'Harvest Log',ref:null})),
+              ].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(row=>(
+                <tr key={row.key}>
+                  <td>{row.date}</td><td>{row.agent}</td>
+                  <td style={{color:'var(--success)'}}>{inr(row.amount)}</td>
+                  <td><span className={`ch-badge ${row.source==='Harvest Log'?'ch-badge-muted':'ch-badge-blue'}`}>{row.source}</span></td>
+                  <td style={{color:'var(--muted)',fontSize:12}}>{row.notes}</td>
+                  <td>
+                    {row.ref
+                      ? (onDeleteAgentPayment && <button className="ch-btn ch-btn-danger ch-btn-xs" onClick={()=>onDeleteAgentPayment(row.ref.id)}>✕ Delete</button>)
+                      : (onResetAgentLog && <button className="ch-btn ch-btn-danger ch-btn-xs" onClick={()=>onResetAgentLog(row.agent,row.date)}>↺ Undo</button>)
+                    }
+                  </td>
                 </tr>
               ))}
             </tbody>
