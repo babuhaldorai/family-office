@@ -175,14 +175,18 @@ export default function HarvestTab({
                   No matching entries.
                 </td></tr>
               )}
-              {displayed.map(e=>(
-                <tr key={e.id}>
+              {displayed.map(e=>{
+                const noBagDed = !(e.tBagDed>0);
+                return (
+                <tr key={e.id} style={noBagDed?{background:'rgba(224,146,74,0.08)'}:undefined}>
                   <td>{e.date}</td><td>{e.worker}</td>
                   <td><span className="ch-badge ch-badge-green">{e.field}</span></td>
                   <td>{e.agent}</td>
                   <td><span className="ch-badge ch-badge-blue">{e.bags} bags</span></td>
                   <td>{(e.tGross||0).toFixed(1)}</td>
-                  <td style={{color:'var(--accent)'}}>−{(e.tBagDed||0).toFixed(2)}</td>
+                  <td style={noBagDed?{color:'var(--warn)',fontWeight:700}:{color:'var(--accent)'}}>
+                    {noBagDed ? <span title="No bag weight deducted for this session">⚠ 0.00</span> : `−${e.tBagDed.toFixed(2)}`}
+                  </td>
                   <td style={{color:'var(--danger)'}}>−{(e.tWaterDed||0).toFixed(2)} ({(e.avgWaterPct||0).toFixed(1)}%)</td>
                   <td style={{fontWeight:700}}>{(e.tNet||0).toFixed(2)}</td>
                   {isAdmin&&(
@@ -194,7 +198,7 @@ export default function HarvestTab({
                     </td>
                   )}
                 </tr>
-              ))}
+              );})}
               {displayed.length>0&&(
                 <tr style={{background:'var(--surface2)',fontWeight:600}}>
                   <td colSpan={8} style={{textAlign:'right',color:'var(--muted)'}}>Totals</td>
@@ -204,6 +208,10 @@ export default function HarvestTab({
               )}
             </tbody>
           </table>
+        </div>
+        <div style={{padding:'8px 20px 14px',fontSize:'0.72rem',color:'var(--muted)',display:'flex',alignItems:'center',gap:5}}>
+          <span style={{display:'inline-block',width:10,height:10,borderRadius:2,background:'rgba(224,146,74,0.3)'}}></span>
+          Highlighted rows have <strong style={{color:'var(--warn)'}}>no bag weight deducted</strong> — double-check if that was intentional.
         </div>
       </div>
     </div>

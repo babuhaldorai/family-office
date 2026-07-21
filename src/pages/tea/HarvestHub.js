@@ -79,6 +79,7 @@ export default function HarvestHub({
       {sub === 'ratepay' && (
         <RatePaymentsTab
           harvest={filteredHarvest}
+          harvestFilter={harvestFilter} setHarvestFilter={setHarvestFilter} harvestWeeks={harvestWeeks}
           advances={advances}
           pendingRateSessions={pendingRateSessions}
           onUpdateRate={onUpdateRate}

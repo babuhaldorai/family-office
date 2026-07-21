@@ -384,7 +384,7 @@ export function agentRateLog(harvest) {
     if (!map[key].to   || h.date > map[key].to)   map[key].to   = h.date;
     if (h.rateStatus === 'confirmed') map[key].confirmed = true;
   });
-  return Object.values(map).sort((a, b) => (b.to || '').localeCompare(a.to || ''));
+  return Object.values(map).sort((a, b) => (b.to || '').localeCompare(a.to || '') || (a.agent || '').localeCompare(b.agent || ''));
 }
 
 // Payment status per harvest row (auto-derived, nothing extra to store) ──

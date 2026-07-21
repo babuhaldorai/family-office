@@ -1,0 +1,235 @@
+diff --git a/src/pages/tea/HarvestHub.js b/src/pages/tea/HarvestHub.js
+index 2e98028..14800b6 100644
+--- a/src/pages/tea/HarvestHub.js
++++ b/src/pages/tea/HarvestHub.js
+@@ -79,6 +79,7 @@ export default function HarvestHub({
+       {sub === 'ratepay' && (
+         <RatePaymentsTab
+           harvest={filteredHarvest}
++          harvestFilter={harvestFilter} setHarvestFilter={setHarvestFilter} harvestWeeks={harvestWeeks}
+           advances={advances}
+           pendingRateSessions={pendingRateSessions}
+           onUpdateRate={onUpdateRate}
+diff --git a/src/pages/tea/HarvestTab.js b/src/pages/tea/HarvestTab.js
+index 18f46c3..c5959e6 100644
+--- a/src/pages/tea/HarvestTab.js
++++ b/src/pages/tea/HarvestTab.js
+@@ -175,14 +175,18 @@ export default function HarvestTab({
+                   No matching entries.
+                 </td></tr>
+               )}
+-              {displayed.map(e=>(
+-                <tr key={e.id}>
++              {displayed.map(e=>{
++                const noBagDed = !(e.tBagDed>0);
++                return (
++                <tr key={e.id} style={noBagDed?{background:'rgba(224,146,74,0.08)'}:undefined}>
+                   <td>{e.date}</td><td>{e.worker}</td>
+                   <td><span className="ch-badge ch-badge-green">{e.field}</span></td>
+                   <td>{e.agent}</td>
+                   <td><span className="ch-badge ch-badge-blue">{e.bags} bags</span></td>
+                   <td>{(e.tGross||0).toFixed(1)}</td>
+-                  <td style={{color:'var(--accent)'}}>−{(e.tBagDed||0).toFixed(2)}</td>
++                  <td style={noBagDed?{color:'var(--warn)',fontWeight:700}:{color:'var(--accent)'}}>
++                    {noBagDed ? <span title="No bag weight deducted for this session">⚠ 0.00</span> : `−${e.tBagDed.toFixed(2)}`}
++                  </td>
+                   <td style={{color:'var(--danger)'}}>−{(e.tWaterDed||0).toFixed(2)} ({(e.avgWaterPct||0).toFixed(1)}%)</td>
+                   <td style={{fontWeight:700}}>{(e.tNet||0).toFixed(2)}</td>
+                   {isAdmin&&(
+@@ -194,7 +198,7 @@ export default function HarvestTab({
+                     </td>
+                   )}
+                 </tr>
+-              ))}
++              );})}
+               {displayed.length>0&&(
+                 <tr style={{background:'var(--surface2)',fontWeight:600}}>
+                   <td colSpan={8} style={{textAlign:'right',color:'var(--muted)'}}>Totals</td>
+@@ -205,6 +209,10 @@ export default function HarvestTab({
+             </tbody>
+           </table>
+         </div>
++        <div style={{padding:'8px 20px 14px',fontSize:'0.72rem',color:'var(--muted)',display:'flex',alignItems:'center',gap:5}}>
++          <span style={{display:'inline-block',width:10,height:10,borderRadius:2,background:'rgba(224,146,74,0.3)'}}></span>
++          Highlighted rows have <strong style={{color:'var(--warn)'}}>no bag weight deducted</strong> — double-check if that was intentional.
++        </div>
+       </div>
+     </div>
+   );
+diff --git a/src/pages/tea/RatePaymentsTab.js b/src/pages/tea/RatePaymentsTab.js
+index 4253edc..0fa2590 100644
+--- a/src/pages/tea/RatePaymentsTab.js
++++ b/src/pages/tea/RatePaymentsTab.js
+@@ -6,17 +6,24 @@ import { EditableRateCell, EditablePayCell } from './InlineEditCells';
+ // from Log Harvest so each tab stays focused (intake vs. money). Rate and
+ // payment edits here save straight onto the harvest row, same as before.
+ export default function RatePaymentsTab({
+-  harvest, advances, pendingRateSessions, onUpdateRate, onUpdateWorkerPay, onUpdateAgentPay, onPayWorkerNetOfAdvance, onPayWorkerFull,
++  harvest, harvestFilter, setHarvestFilter, harvestWeeks,
++  advances, pendingRateSessions, onUpdateRate, onUpdateWorkerPay, onUpdateAgentPay, onPayWorkerNetOfAdvance, onPayWorkerFull,
+ }) {
+-  const [fAgent, setFAgent]   = useState('all');
++  const [fField,  setFField]  = useState('all');
++  const [fAgent,  setFAgent]  = useState('all');
+   const [fWorker, setFWorker] = useState('all');
++  const [fFrom,   setFFrom]   = useState('');
++  const [fTo,     setFTo]     = useState('');
+ 
+   const rows = useMemo(() => {
+     return [...harvest]
++      .filter(e => fField  === 'all' || e.field  === fField)
+       .filter(e => fAgent  === 'all' || e.agent  === fAgent)
+       .filter(e => fWorker === 'all' || e.worker === fWorker)
++      .filter(e => !fFrom  || (e.date||'') >= fFrom)
++      .filter(e => !fTo    || (e.date||'') <= fTo)
+       .sort((a,b) => (b.date||'').localeCompare(a.date||''));
+-  }, [harvest, fAgent, fWorker]);
++  }, [harvest, fField, fAgent, fWorker, fFrom, fTo]);
+ 
+   // Pending advance as of each session's own date — an advance borrowed
+   // AFTER a session shouldn't retroactively reduce that session's payout.
+@@ -24,8 +31,8 @@ export default function RatePaymentsTab({
+     .filter(a => a.worker === worker && !a.deducted && (a.date||'') <= (date||''))
+     .reduce((s,a) => s + (a.amount||0), 0);
+ 
+-  const hasFilter = fAgent!=='all' || fWorker!=='all';
+-  const clearFilters = () => { setFAgent('all'); setFWorker('all'); };
++  const hasFilter = fField!=='all' || fAgent!=='all' || fWorker!=='all' || fFrom || fTo;
++  const clearFilters = () => { setFField('all'); setFAgent('all'); setFWorker('all'); setFFrom(''); setFTo(''); };
+ 
+   return (
+     <div>
+@@ -50,6 +57,24 @@ export default function RatePaymentsTab({
+         <div style={{padding:'14px 20px',borderBottom:'1px solid var(--border)',display:'flex',flexWrap:'wrap',gap:10,alignItems:'flex-end'}}>
+           <div style={{fontFamily:'var(--font-display)',fontSize:16,fontWeight:600,color:'var(--text)',marginRight:8,alignSelf:'center'}}>Rate &amp; Payments</div>
+ 
++          {harvestFilter!==undefined && (
++            <div>
++              <div style={{fontSize:'0.72rem',color:'var(--muted)',marginBottom:3}}>WEEK</div>
++              <select className="ch-input" style={{minWidth:180}} value={harvestFilter} onChange={e=>setHarvestFilter(e.target.value)}>
++                <option value="all">All Weeks</option>
++                {(harvestWeeks||[]).map(w=>typeof w==='object'?<option key={w.value} value={w.value}>{w.label}</option>:<option key={w} value={w}>{w}</option>)}
++              </select>
++            </div>
++          )}
++
++          <div>
++            <div style={{fontSize:'0.72rem',color:'var(--muted)',marginBottom:3}}>FIELD</div>
++            <select className="ch-input" style={{minWidth:130}} value={fField} onChange={e=>setFField(e.target.value)}>
++              <option value="all">All Fields</option>
++              {[...new Set(harvest.map(e=>e.field).filter(Boolean))].sort().map(f=><option key={f}>{f}</option>)}
++            </select>
++          </div>
++
+           <div>
+             <div style={{fontSize:'0.72rem',color:'var(--muted)',marginBottom:3}}>AGENT</div>
+             <select className="ch-input" style={{minWidth:130}} value={fAgent} onChange={e=>setFAgent(e.target.value)}>
+@@ -66,6 +91,15 @@ export default function RatePaymentsTab({
+             </select>
+           </div>
+ 
++          <div>
++            <div style={{fontSize:'0.72rem',color:'var(--muted)',marginBottom:3}}>FROM</div>
++            <input className="ch-input" type="date" value={fFrom} onChange={e=>setFFrom(e.target.value)} style={{minWidth:130}}/>
++          </div>
++          <div>
++            <div style={{fontSize:'0.72rem',color:'var(--muted)',marginBottom:3}}>TO</div>
++            <input className="ch-input" type="date" value={fTo} onChange={e=>setFTo(e.target.value)} style={{minWidth:130}}/>
++          </div>
++
+           {hasFilter && (
+             <button className="ch-btn ch-btn-ghost ch-btn-sm" onClick={clearFilters} style={{alignSelf:'flex-end'}}>
+               ✕ Clear
+@@ -81,14 +115,14 @@ export default function RatePaymentsTab({
+           <table className="ch-table ch-ratepay-table">
+             <thead>
+               <tr>
+-                <th>Date</th><th>Worker</th><th>Agent</th>
++                <th>Date</th><th>Worker</th><th>Agent</th><th>Total Kg</th>
+                 <th>Worker pay</th><th>Advance</th><th>Worker Payment</th>
+                 <th>Rate</th><th>Agent rev</th><th>Agent Payment</th>
+               </tr>
+             </thead>
+             <tbody>
+               {rows.length===0&&(
+-                <tr><td colSpan={9} style={{textAlign:'center',padding:40,color:'var(--muted)'}}>
++                <tr><td colSpan={10} style={{textAlign:'center',padding:40,color:'var(--muted)'}}>
+                   No matching entries.
+                 </td></tr>
+               )}
+@@ -97,6 +131,7 @@ export default function RatePaymentsTab({
+                 return (
+                   <tr key={e.id}>
+                     <td>{e.date}</td><td>{e.worker}</td><td>{e.agent}</td>
++                    <td>{(e.tNet||0).toFixed(1)}</td>
+                     <td style={{color:'var(--success)'}}>{inr(e.workerPay||0)}</td>
+                     <td>{advance>0 ? <span className="ch-badge ch-badge-gold" title="Pending advance as of this session's date">−{inr(advance)}</span> : <span style={{color:'var(--muted)'}}>—</span>}</td>
+                     <td><EditablePayCell id={e.id} paidAmount={e.workerPayAmount} paidDate={e.workerPayDate} total={e.workerPay} onUpdate={onUpdateWorkerPay} advance={advance} onMarkPaidWithAdvance={()=>onPayWorkerNetOfAdvance(e.id)} onMarkPaidFull={()=>onPayWorkerFull(e.id)}/></td>
+@@ -109,12 +144,13 @@ export default function RatePaymentsTab({
+               {rows.length>0&&(
+                 <tr style={{background:'var(--surface2)',fontWeight:600}}>
+                   <td colSpan={3} style={{textAlign:'right',color:'var(--muted)'}}>Totals</td>
++                  <td>{rows.reduce((s,e)=>s+(e.tNet||0),0).toFixed(1)} kg</td>
+                   <td style={{color:'var(--success)'}}>{inr(rows.reduce((s,e)=>s+(e.workerPay||0),0))}</td>
+                   <td></td>
+-                  <td></td>
++                  <td style={{color:'var(--success)'}}>{inr(rows.reduce((s,e)=>s+(e.workerPayAmount||0),0))}</td>
+                   <td></td>
+                   <td style={{fontFamily:'var(--font-mono)'}}>₹{rows.reduce((s,e)=>s+(e.agentRev||0),0).toFixed(1)}</td>
+-                  <td></td>
++                  <td style={{color:'var(--success)'}}>{inr(rows.reduce((s,e)=>s+(e.agentPayAmount||0),0))}</td>
+                 </tr>
+               )}
+             </tbody>
+@@ -123,7 +159,7 @@ export default function RatePaymentsTab({
+       </div>
+ 
+       <div style={{marginTop:8,fontSize:'0.72rem',color:'var(--muted)',display:'flex',alignItems:'center',gap:5}}>
+-        <span>💸</span> Advance shows what was pending as of that session's date. <strong>Net</strong> pays the balance after deducting it (and clears the advance); <strong>Full</strong> pays the whole amount and leaves the advance for later.
++        <span>💸</span> Advance shows what was pending as of that session's date. The primary pay button nets it against the amount owed; the small link below it pays the full amount and leaves the advance for later.
+       </div>
+     </div>
+   );
+diff --git a/src/styles/global.css b/src/styles/global.css
+index 3623ff1..525389a 100644
+--- a/src/styles/global.css
++++ b/src/styles/global.css
+@@ -724,18 +724,18 @@ textarea { resize: vertical; min-height: 80px; }
+ /* Rate & Payments tab — tighter than the Intake table, since every row has
+    several interactive input cells and needs to fit without zooming out. */
+ .ch-ratepay-table, .ch-ratepay-table th, .ch-ratepay-table td {
+-  font-size: 0.9rem;
++  font-size: 0.83rem;
+ }
+ .ch-ratepay-table th, .ch-ratepay-table td {
+-  padding: 9px 11px;
++  padding: 7px 9px;
+   white-space: nowrap;
+ }
+ .ch-ratepay-table td { font-family: var(--font-mono); }
+-.ch-ratepay-table .ch-inline-pay-cell { font-size: 0.9rem; gap: 5px; }
+-.ch-ratepay-table .ch-inline-input { font-size: 0.9rem; padding: 4px 7px; }
+-.ch-ratepay-table .ch-inline-input-amt { width: 68px; }
+-.ch-ratepay-table .ch-inline-input-date { width: 130px; }
+-.ch-ratepay-table .ch-inline-tick { font-size: 0.78rem; padding: 4px 8px; white-space: nowrap; }
++.ch-ratepay-table .ch-inline-pay-cell { font-size: 0.8rem; gap: 4px; }
++.ch-ratepay-table .ch-inline-input { font-size: 0.8rem; padding: 3px 6px; }
++.ch-ratepay-table .ch-inline-input-amt { width: 58px; }
++.ch-ratepay-table .ch-inline-input-date { width: 110px; }
++.ch-ratepay-table .ch-inline-tick { font-size: 0.74rem; padding: 3px 7px; white-space: nowrap; }
+ 
+ /* Forms — match global inputs */
+ .ch-form-group { display:flex; flex-direction:column; gap:5px; margin-bottom:16px; }
+diff --git a/src/utils/chaayaService.js b/src/utils/chaayaService.js
+index 610b514..657edbe 100644
+--- a/src/utils/chaayaService.js
++++ b/src/utils/chaayaService.js
+@@ -384,7 +384,7 @@ export function agentRateLog(harvest) {
+     if (!map[key].to   || h.date > map[key].to)   map[key].to   = h.date;
+     if (h.rateStatus === 'confirmed') map[key].confirmed = true;
+   });
+-  return Object.values(map).sort((a, b) => (b.to || '').localeCompare(a.to || ''));
++  return Object.values(map).sort((a, b) => (b.to || '').localeCompare(a.to || '') || (a.agent || '').localeCompare(b.agent || ''));
+ }
+ 
+ // Payment status per harvest row (auto-derived, nothing extra to store) ──

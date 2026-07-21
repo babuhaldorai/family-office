@@ -724,18 +724,18 @@ textarea { resize: vertical; min-height: 80px; }
 /* Rate & Payments tab — tighter than the Intake table, since every row has
    several interactive input cells and needs to fit without zooming out. */
 .ch-ratepay-table, .ch-ratepay-table th, .ch-ratepay-table td {
-  font-size: 0.9rem;
+  font-size: 0.83rem;
 }
 .ch-ratepay-table th, .ch-ratepay-table td {
-  padding: 9px 11px;
+  padding: 7px 9px;
   white-space: nowrap;
 }
 .ch-ratepay-table td { font-family: var(--font-mono); }
-.ch-ratepay-table .ch-inline-pay-cell { font-size: 0.9rem; gap: 5px; }
-.ch-ratepay-table .ch-inline-input { font-size: 0.9rem; padding: 4px 7px; }
-.ch-ratepay-table .ch-inline-input-amt { width: 68px; }
-.ch-ratepay-table .ch-inline-input-date { width: 130px; }
-.ch-ratepay-table .ch-inline-tick { font-size: 0.78rem; padding: 4px 8px; white-space: nowrap; }
+.ch-ratepay-table .ch-inline-pay-cell { font-size: 0.8rem; gap: 4px; }
+.ch-ratepay-table .ch-inline-input { font-size: 0.8rem; padding: 3px 6px; }
+.ch-ratepay-table .ch-inline-input-amt { width: 58px; }
+.ch-ratepay-table .ch-inline-input-date { width: 110px; }
+.ch-ratepay-table .ch-inline-tick { font-size: 0.74rem; padding: 3px 7px; white-space: nowrap; }
 
 /* Forms — match global inputs */
 .ch-form-group { display:flex; flex-direction:column; gap:5px; margin-bottom:16px; }
