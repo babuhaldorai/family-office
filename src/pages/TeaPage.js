@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   harvestChaayaService, ratesChaayaService, settlementService,
-  agentPaymentService, advanceService, maintenanceService, weatherService,
+  agentPaymentService, advanceService, maintenanceService, weatherService, inventoryService,
   workersChaayaService, agentsChaayaService, fieldsChaayaService,
-  calcBagWaterPct, getRateForAgentDate, enrichHarvestWithPaymentStatus, lastKnownRate, consumeWorkerAdvance,
+  calcBagWaterPct, getRateForAgentDate, explicitPaymentStatus, lastKnownRate, consumeWorkerAdvance,
   periodBounds, getFilteredHarvest, weekLabel, todayStr,
 } from '../utils/chaayaService';
 import { useAuth } from '../context/AuthContext';
@@ -126,6 +126,7 @@ Deleting it will allow transactions on this field again. Are you sure?`);
   const [agentPayments, setAgentPayments] = useState([]);
   const [advances, setAdvances]       = useState([]);
   const [maintenance, setMaintenance] = useState([]);
+  const [inventory, setInventory] = useState([]);
   const [weather, setWeather]         = useState([]);
   const [leases,  setLeases]          = useState([]);
 
@@ -178,6 +179,7 @@ Deleting it will allow transactions on this field again. Are you sure?`);
       agentPaymentService.subscribe(setAgentPayments),
       advanceService.subscribe(setAdvances),
       maintenanceService.subscribe(setMaintenance),
+      inventoryService.subscribe(setInventory),
       weatherService.subscribe(setWeather),
       // leases loaded via useEffect below
       workersChaayaService.subscribe(setWorkers),
@@ -438,8 +440,8 @@ Deleting it will allow transactions on this field again. Are you sure?`);
     return result;
   }, [harvest]);
   const harvestWithPay = useMemo(
-    () => enrichHarvestWithPaymentStatus(harvest, settlements, agentPayments),
-    [harvest, settlements, agentPayments]
+    () => explicitPaymentStatus(harvest),
+    [harvest]
   );
   const filteredHarvestWithPay = useMemo(
     () => harvestFilter === 'all' ? harvestWithPay : harvestWithPay.filter(e => (e.weekStr || weekLabel(e.date)) === harvestFilter),
@@ -522,14 +524,14 @@ Deleting it will allow transactions on this field again. Are you sure?`);
         )}
         {tab === 'maintenance' && (
           <MaintenanceTab
-            isAdmin={isAdmin} maintenance={maintenance}
+            isAdmin={isAdmin} maintenance={maintenance} inventory={inventory}
             workerList={workerList} fieldList={fieldList}
             onSave={async data => {
               if (!data.date)   return alert('❌ Please select a date.');
               if (!data.field)  return alert('❌ Please select a field.');
               if (!data.task)   return alert('❌ Please select a task.');
               if (!data.worker) return alert('❌ Please select a worker.');
-              if (data.task !== 'Fertilizing' && (!data.rate || Number(data.rate) <= 0)) return alert('❌ Please enter a valid rate.');
+              if (data.task !== 'Fertilizing' && data.task !== 'Harvesting Equipment' && (!data.rate || Number(data.rate) <= 0)) return alert('❌ Please enter a valid rate.');
               const mDate = data.date || today;
               const activeLease = getActiveLeaseForFieldDate(data.field, mDate);
               if(activeLease){alert(`❌ Cannot log maintenance on ${mDate} — ${data.field} is on lease from ${activeLease.startDate} to ${activeLease.endDate}.`);return;}
@@ -537,6 +539,11 @@ Deleting it will allow transactions on this field again. Are you sure?`);
               writeAudit('create','tea_maintenance',`Added ${data.task} on ${data.field} - ${data.date}`);
             }}
             onDelete={id => { if (window.confirm('Delete?')) maintenanceService.delete(id).then(()=>writeAudit('delete','tea_maintenance',`Deleted maintenance record ${id}`)); }}
+            onSavePurchase={async data => {
+              await inventoryService.add(data);
+              writeAudit('create','tea_inventory',`Logged purchase: ${data.itemName} × ${data.totalUnits} @ ₹${data.unitCost}`);
+            }}
+            onDeletePurchase={id => { if (window.confirm('Delete this purchase record?')) inventoryService.delete(id).then(()=>writeAudit('delete','tea_inventory',`Deleted inventory purchase ${id}`)); }}
           />
         )}
         {tab === 'analytics' && (

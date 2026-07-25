@@ -145,6 +145,35 @@ export const maintenanceService = {
   async delete(id) { return deleteDoc(doc(db, 'tea_maintenance', id)); },
 };
 
+// ─── INVENTORY (bulk fertilizer/equipment purchases) ──────────────────────────
+// A purchase is bought once (e.g. 50 bags of DAP, or 5 sprayers) and then
+// used up gradually across different fields over time via Maintenance
+// entries that reference it — inventoryWithRemaining() tracks how much of
+// each purchase is left unallocated.
+export const inventoryService = {
+  subscribe(cb) {
+    return onSnapshot(
+      query(col('tea_inventory'), orderBy('createdAt', 'desc')),
+      s => cb(snap2arr(s)),
+      e => console.error('inventory error:', e)
+    );
+  },
+  async add(data) { return addDoc(col('tea_inventory'), { ...data, createdAt: serverTimestamp() }); },
+  async update(id, data) { return updateDoc(doc(db, 'tea_inventory', id), data); },
+  async delete(id) { return deleteDoc(doc(db, 'tea_inventory', id)); },
+};
+
+export function inventoryWithRemaining(inventory, maintenance) {
+  return inventory.map(p => {
+    let allocated = 0;
+    maintenance.forEach(m => {
+      (m.fertItems || []).forEach(it => { if (it.purchaseId === p.id) allocated += (it.bags || 0); });
+      (m.equipItems || []).forEach(it => { if (it.purchaseId === p.id) allocated += (it.units || 0); });
+    });
+    return { ...p, allocated, remaining: Math.max(0, (p.totalUnits || 0) - allocated) };
+  });
+}
+
 // ─── WEATHER ─────────────────────────────────────────────────────────────────
 export const weatherService = {
   subscribe(cb) {
@@ -320,6 +349,27 @@ export async function consumeWorkerAdvance(advances, worker, amount) {
       remaining = 0;
     }
   }
+}
+
+// Strictly explicit version — used for display in Rate & Payments. Unlike
+// enrichHarvestWithPaymentStatus, this NEVER pulls in a FIFO-allocated guess
+// from a legacy bulk payment; a row only shows an amount if it was actually
+// entered on that specific row. (The FIFO-aware version above is still used
+// internally by the Worker/Agent Payments summary tabs, so old bulk payments
+// still correctly reduce the aggregate outstanding total — they just don't
+// silently attribute themselves to individual rows anymore.)
+export function explicitPaymentStatus(harvest) {
+  return harvest.map(h => {
+    const workerPayAmount = h.workerPayAmount || 0;
+    const agentPayAmount  = h.agentPayAmount  || 0;
+    const workerPayStatus = !h.workerPay ? 'n/a' : workerPayAmount >= h.workerPay - 0.5 ? 'paid' : workerPayAmount > 0 ? 'partial' : 'pending';
+    const agentPayStatus  = !h.agentRev  ? 'n/a' : agentPayAmount  >= h.agentRev - 0.5  ? 'paid' : agentPayAmount  > 0 ? 'partial' : 'pending';
+    return {
+      ...h,
+      workerPayAmount, workerPayDate: h.workerPayDate || null, workerPayStatus,
+      agentPayAmount,  agentPayDate:  h.agentPayDate  || null, agentPayStatus,
+    };
+  });
 }
 
 export function lastKnownRate(harvest, agent) {
