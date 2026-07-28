@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { LayoutDashboard, Leaf, Home, Wrench, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Leaf, Home, Wrench, Sparkles, Menu, X } from 'lucide-react';
 import LoginPage from './pages/LoginPage';
 import Overview from './pages/Overview';
 import TeaPage from './pages/TeaPage';
 import RentalsPage from './pages/RentalsPage';
 import AdminPage from './pages/AdminPage';
 import HomesPage from './pages/HomesPage';
+import InsightsPage from './pages/InsightsPage';
 import Sidebar from './components/layout/Sidebar';
 import './styles/global.css';
 
@@ -15,6 +16,7 @@ const BOTTOM_NAV = [
   { label: 'Tea',      icon: Leaf,            path: '/tea' },
   { label: 'Rentals',  icon: Home,            path: '/rentals' },
   { label: 'Homes',    icon: Wrench,          path: '/homes' },
+  { label: 'Insights', icon: Sparkles,        path: '/insights' },
 ];
 
 function AppShell() {
@@ -46,6 +48,7 @@ function AppShell() {
       case '/rentals':return <RentalsPage />;
       case '/admin':  return <AdminPage />;
       case '/homes':  return <HomesPage />;
+      case '/insights': return <InsightsPage />;
       default:        return <Overview />;
     }
   };

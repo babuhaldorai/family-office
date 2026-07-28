@@ -2,7 +2,7 @@ import React from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard, Leaf, Home,
-  LogOut, Settings, Wrench,
+  LogOut, Settings, Wrench, Sparkles,
 } from 'lucide-react';
 
 const NAV = [
@@ -14,6 +14,8 @@ const NAV = [
   { label: 'Rental Homes',   icon: Home,             path: '/rentals' },
   { section: 'Home Maintenance' },
   { label: 'Homes & Expenses', icon: Wrench,         path: '/homes' },
+  { section: 'Insights' },
+  { label: 'Insights',       icon: Sparkles,         path: '/insights' },
   { section: 'Admin', adminOnly: true },
   { label: 'User Management', icon: Settings,        path: '/admin', adminOnly: true },
 ];

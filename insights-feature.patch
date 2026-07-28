@@ -1,0 +1,656 @@
+diff --git a/netlify.toml b/netlify.toml
+index 9ea03b6..2494a47 100644
+--- a/netlify.toml
++++ b/netlify.toml
+@@ -5,3 +5,6 @@
+ [build.environment]
+   CI = "false"
+   NODE_VERSION = "18"
++
++[functions]
++  directory = "netlify/functions"
+diff --git a/netlify/functions/get-recommendations.js b/netlify/functions/get-recommendations.js
+new file mode 100644
+index 0000000..6cab49b
+--- /dev/null
++++ b/netlify/functions/get-recommendations.js
+@@ -0,0 +1,61 @@
++// Server-side proxy to the Anthropic API. Keeps the API key out of the
++// browser — the client sends a pre-computed JSON summary of the business's
++// own numbers (trends, outliers, forecasts already calculated client-side),
++// and this function asks Claude to turn that into plain-English
++// recommendations.
++exports.handler = async (event) => {
++  if (event.httpMethod !== 'POST') {
++    return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
++  }
++
++  const apiKey = process.env.ANTHROPIC_API_KEY;
++  if (!apiKey) {
++    return {
++      statusCode: 500,
++      body: JSON.stringify({ error: 'ANTHROPIC_API_KEY is not set on this Netlify site. Add it under Site configuration → Environment variables.' }),
++    };
++  }
++
++  let summary;
++  try {
++    summary = JSON.parse(event.body).summary;
++  } catch (e) {
++    return { statusCode: 400, body: JSON.stringify({ error: 'Invalid request body' }) };
++  }
++  if (!summary) {
++    return { statusCode: 400, body: JSON.stringify({ error: 'Missing summary in request body' }) };
++  }
++
++  try {
++    const resp = await fetch('https://api.anthropic.com/v1/messages', {
++      method: 'POST',
++      headers: {
++        'Content-Type': 'application/json',
++        'x-api-key': apiKey,
++        'anthropic-version': '2023-06-01',
++      },
++      body: JSON.stringify({
++        model: 'claude-sonnet-4-5',
++        max_tokens: 1200,
++        messages: [{
++          role: 'user',
++          content:
++            "You are reviewing a family's small business data — a tea plantation and a few rental properties. " +
++            'Below is a JSON summary already computed from their real records (monthly trends, outliers, simple forecasts, and a list of rule-based flags). ' +
++            'Write 5-8 short, specific, plain-English bullet points: the most important observations and concrete next steps, ordered by importance. ' +
++            'Use the actual numbers given. Do not restate the raw JSON. Do not give generic business advice unconnected to these figures.\n\n' +
++            JSON.stringify(summary, null, 2),
++        }],
++      }),
++    });
++
++    const data = await resp.json();
++    if (!resp.ok) {
++      return { statusCode: resp.status, body: JSON.stringify({ error: data.error?.message || 'Anthropic API error' }) };
++    }
++    const text = (data.content || []).map(c => c.text).filter(Boolean).join('\n');
++    return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) };
++  } catch (e) {
++    return { statusCode: 500, body: JSON.stringify({ error: e.message }) };
++  }
++};
+diff --git a/package-lock.json b/package-lock.json
+index e36f92e..0252f0e 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -16862,6 +16862,23 @@
+         }
+       }
+     },
++    "node_modules/tailwindcss/node_modules/yaml": {
++      "version": "2.9.0",
++      "resolved": "https://registry.npmjs.org/yaml/-/yaml-2.9.0.tgz",
++      "integrity": "sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==",
++      "license": "ISC",
++      "optional": true,
++      "peer": true,
++      "bin": {
++        "yaml": "bin.mjs"
++      },
++      "engines": {
++        "node": ">= 14.6"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/eemeli"
++      }
++    },
+     "node_modules/tapable": {
+       "version": "2.3.2",
+       "resolved": "https://registry.npmjs.org/tapable/-/tapable-2.3.2.tgz",
+diff --git a/src/App.js b/src/App.js
+index 7473fae..1f8733e 100644
+--- a/src/App.js
++++ b/src/App.js
+@@ -1,12 +1,13 @@
+ import React, { useState } from 'react';
+ import { AuthProvider, useAuth } from './context/AuthContext';
+-import { LayoutDashboard, Leaf, Home, Wrench, Menu, X } from 'lucide-react';
++import { LayoutDashboard, Leaf, Home, Wrench, Sparkles, Menu, X } from 'lucide-react';
+ import LoginPage from './pages/LoginPage';
+ import Overview from './pages/Overview';
+ import TeaPage from './pages/TeaPage';
+ import RentalsPage from './pages/RentalsPage';
+ import AdminPage from './pages/AdminPage';
+ import HomesPage from './pages/HomesPage';
++import InsightsPage from './pages/InsightsPage';
+ import Sidebar from './components/layout/Sidebar';
+ import './styles/global.css';
+ 
+@@ -15,6 +16,7 @@ const BOTTOM_NAV = [
+   { label: 'Tea',      icon: Leaf,            path: '/tea' },
+   { label: 'Rentals',  icon: Home,            path: '/rentals' },
+   { label: 'Homes',    icon: Wrench,          path: '/homes' },
++  { label: 'Insights', icon: Sparkles,        path: '/insights' },
+ ];
+ 
+ function AppShell() {
+@@ -46,6 +48,7 @@ function AppShell() {
+       case '/rentals':return <RentalsPage />;
+       case '/admin':  return <AdminPage />;
+       case '/homes':  return <HomesPage />;
++      case '/insights': return <InsightsPage />;
+       default:        return <Overview />;
+     }
+   };
+diff --git a/src/components/layout/Sidebar.js b/src/components/layout/Sidebar.js
+index 7125288..25d2f54 100644
+--- a/src/components/layout/Sidebar.js
++++ b/src/components/layout/Sidebar.js
+@@ -2,7 +2,7 @@ import React from 'react';
+ import { useAuth } from '../../context/AuthContext';
+ import {
+   LayoutDashboard, Leaf, Home,
+-  LogOut, Settings, Wrench,
++  LogOut, Settings, Wrench, Sparkles,
+ } from 'lucide-react';
+ 
+ const NAV = [
+@@ -14,6 +14,8 @@ const NAV = [
+   { label: 'Rental Homes',   icon: Home,             path: '/rentals' },
+   { section: 'Home Maintenance' },
+   { label: 'Homes & Expenses', icon: Wrench,         path: '/homes' },
++  { section: 'Insights' },
++  { label: 'Insights',       icon: Sparkles,         path: '/insights' },
+   { section: 'Admin', adminOnly: true },
+   { label: 'User Management', icon: Settings,        path: '/admin', adminOnly: true },
+ ];
+diff --git a/src/pages/InsightsPage.js b/src/pages/InsightsPage.js
+new file mode 100644
+index 0000000..e071044
+--- /dev/null
++++ b/src/pages/InsightsPage.js
+@@ -0,0 +1,212 @@
++import React, { useEffect, useState, useMemo } from 'react';
++import { db } from '../firebase';
++import { getDocs, collection } from 'firebase/firestore';
++import {
++  harvestChaayaService, maintenanceService, inventoryService,
++  advanceService, settlementService, agentPaymentService, workersChaayaService,
++} from '../utils/chaayaService';
++import { propertyService } from '../utils/firestoreService';
++import { teaInsights } from '../utils/teaInsights';
++import { rentalInsights } from '../utils/rentalInsights';
++import { Sparkles, TrendingUp, TrendingDown, AlertTriangle } from 'lucide-react';
++
++const SEV_COLOR = { high: 'var(--danger, #d9534f)', medium: 'var(--warn, #e0924a)', low: 'var(--muted, #888)' };
++
++function FlagList({ flags }) {
++  if (!flags.length) {
++    return <div style={{ color: 'var(--muted)', fontSize: 13, padding: '8px 0' }}>No notable flags right now — nothing stands out from your recent data.</div>;
++  }
++  return (
++    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
++      {flags.map((f, i) => (
++        <div key={i} style={{
++          display: 'flex', gap: 10, alignItems: 'flex-start',
++          padding: '10px 12px', borderRadius: 8,
++          background: 'var(--surface2)', border: `1px solid ${SEV_COLOR[f.severity]}33`,
++        }}>
++          <AlertTriangle size={16} style={{ color: SEV_COLOR[f.severity], flexShrink: 0, marginTop: 2 }} />
++          <div>
++            <div style={{ fontSize: 11, fontWeight: 600, color: SEV_COLOR[f.severity], textTransform: 'uppercase', letterSpacing: '.04em' }}>{f.area}</div>
++            <div style={{ fontSize: 13.5, color: 'var(--text)', marginTop: 2 }}>{f.text}</div>
++          </div>
++        </div>
++      ))}
++    </div>
++  );
++}
++
++function ForecastCard({ label, prefix='', suffix='', forecast }) {
++  if (!forecast) return (
++    <div style={{ padding: '10px 12px', background: 'var(--surface2)', borderRadius: 8, fontSize: 13, color: 'var(--muted)' }}>
++      Not enough monthly history yet to forecast {label.toLowerCase()} (need at least 3 months).
++    </div>
++  );
++  const val = forecast.forecasts[0];
++  const trendUp = forecast.slope >= 0;
++  return (
++    <div style={{ padding: '12px 14px', background: 'var(--surface2)', borderRadius: 8 }}>
++      <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Next Month Forecast — {label}</div>
++      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 4 }}>
++        <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)' }}>{prefix}{val.toLocaleString(undefined, { maximumFractionDigits: 0 })}{suffix}</span>
++        {trendUp ? <TrendingUp size={16} color="var(--success, #4caf80)" /> : <TrendingDown size={16} color="var(--danger, #d9534f)" />}
++      </div>
++      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Based on trend + recent average — a simple projection, not a guarantee.</div>
++    </div>
++  );
++}
++
++export default function InsightsPage() {
++  const [harvest, setHarvest] = useState([]);
++  const [maintenance, setMaintenance] = useState([]);
++  const [inventory, setInventory] = useState([]);
++  const [advances, setAdvances] = useState([]);
++  const [settlements, setSettlements] = useState([]);
++  const [agentPayments, setAgentPayments] = useState([]);
++  const [workers, setWorkers] = useState([]);
++  const [properties, setProperties] = useState([]);
++  const [transactions, setTransactions] = useState([]);
++  const [loaded, setLoaded] = useState(false);
++
++  const [aiText, setAiText] = useState('');
++  const [aiLoading, setAiLoading] = useState(false);
++  const [aiError, setAiError] = useState('');
++
++  useEffect(() => {
++    const subs = [
++      harvestChaayaService.subscribe(setHarvest),
++      maintenanceService.subscribe(setMaintenance),
++      inventoryService.subscribe(setInventory),
++      advanceService.subscribe(setAdvances),
++      settlementService.subscribe(setSettlements),
++      agentPaymentService.subscribe(setAgentPayments),
++      workersChaayaService.subscribe(setWorkers),
++    ];
++    (async () => {
++      const [props, txSnap] = await Promise.all([
++        propertyService.getAll(),
++        getDocs(collection(db, 'rental_transactions')),
++      ]);
++      setProperties(props);
++      setTransactions(txSnap.docs.map(d => ({ id: d.id, ...d.data() })));
++      setLoaded(true);
++    })();
++    return () => subs.forEach(u => u && u());
++  }, []);
++
++  const workerList = useMemo(() => workers.filter(w => w.status !== 'inactive').map(w => w.name).sort(), [workers]);
++
++  const tea = useMemo(
++    () => teaInsights(harvest, maintenance, inventory, advances, settlements, agentPayments, workerList),
++    [harvest, maintenance, inventory, advances, settlements, agentPayments, workerList]
++  );
++  const rental = useMemo(() => rentalInsights(transactions, properties), [transactions, properties]);
++
++  const allFlags = [...tea.flags.map(f => ({ ...f, business: 'Tea' })), ...rental.flags.map(f => ({ ...f, business: 'Rentals' }))]
++    .sort((a, b) => ({ high: 0, medium: 1, low: 2 }[a.severity] - { high: 0, medium: 1, low: 2 }[b.severity]));
++
++  const askAI = async () => {
++    setAiLoading(true);
++    setAiError('');
++    setAiText('');
++    const summary = {
++      tea: {
++        flags: tea.flags,
++        marginPerKgLast6Months: tea.marginSeries.slice(-6),
++        harvestKgLast6Months: tea.kgSeries.slice(-6),
++        maintenanceCostLast6Months: tea.maintSeries.slice(-6),
++        nextMonthHarvestKgForecast: tea.kgForecast?.forecasts?.[0] ?? null,
++      },
++      rentals: {
++        flags: rental.flags,
++        netIncomeLast6Months: rental.netSeries.slice(-6),
++        propertyPerformance: rental.propStats,
++        nextMonthNetIncomeForecast: rental.netForecast?.forecasts?.[0] ?? null,
++      },
++    };
++    try {
++      const resp = await fetch('/.netlify/functions/get-recommendations', {
++        method: 'POST',
++        headers: { 'Content-Type': 'application/json' },
++        body: JSON.stringify({ summary }),
++      });
++      const data = await resp.json();
++      if (!resp.ok) throw new Error(data.error || 'Request failed');
++      setAiText(data.text || 'No response text returned.');
++    } catch (e) {
++      setAiError(e.message);
++    } finally {
++      setAiLoading(false);
++    }
++  };
++
++  if (!loaded) {
++    return <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>Loading…</div>;
++  }
++
++  return (
++    <div style={{ maxWidth: 900, margin: '0 auto', padding: '20px 16px' }}>
++      <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Insights</h1>
++      <p style={{ color: 'var(--muted)', fontSize: 13.5, marginBottom: 20 }}>
++        Flags and forecasts computed directly from your own data — no training required, updates automatically as you log more.
++      </p>
++
++      {/* AI recommendations panel */}
++      <div className="ch-card" style={{ marginBottom: 20 }}>
++        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
++          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
++            <Sparkles size={18} color="var(--accent)" />
++            <span style={{ fontWeight: 600, color: 'var(--text)' }}>AI Recommendations</span>
++          </div>
++          <button className="ch-btn ch-btn-primary ch-btn-sm" onClick={askAI} disabled={aiLoading}>
++            {aiLoading ? 'Thinking…' : '✨ Get Recommendations'}
++          </button>
++        </div>
++        {aiError && (
++          <div style={{ marginTop: 10, fontSize: 13, color: 'var(--danger)' }}>
++            {aiError}
++            {aiError.includes('ANTHROPIC_API_KEY') && (
++              <div style={{ marginTop: 4, color: 'var(--muted)' }}>
++                This needs a one-time setup: get an API key from console.anthropic.com, then add it as <code>ANTHROPIC_API_KEY</code> under
++                Netlify → Site configuration → Environment variables, and redeploy.
++              </div>
++            )}
++          </div>
++        )}
++        {aiText && (
++          <div style={{ marginTop: 12, fontSize: 14, color: 'var(--text)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
++            {aiText}
++          </div>
++        )}
++        {!aiText && !aiError && !aiLoading && (
++          <div style={{ marginTop: 10, fontSize: 13, color: 'var(--muted)' }}>
++            Sends the flags and forecasts below (not raw records) to Claude for a plain-English summary and next steps.
++          </div>
++        )}
++      </div>
++
++      {/* Tea section */}
++      <div className="ch-card" style={{ marginBottom: 20 }}>
++        <div className="ch-card-title">🌿 Tea Plantation</div>
++        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginBottom: 16 }}>
++          <ForecastCard label="Harvest Volume" suffix=" kg" forecast={tea.kgForecast} />
++        </div>
++        <FlagList flags={tea.flags} />
++      </div>
++
++      {/* Rentals section */}
++      <div className="ch-card" style={{ marginBottom: 20 }}>
++        <div className="ch-card-title">🏠 Rental Homes</div>
++        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginBottom: 16 }}>
++          <ForecastCard label="Net Income" prefix="₹" forecast={rental.netForecast} />
++        </div>
++        <FlagList flags={rental.flags} />
++      </div>
++
++      {allFlags.length === 0 && (
++        <div style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 13, padding: 20 }}>
++          Everything looks steady across both businesses right now.
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/src/utils/insightsEngine.js b/src/utils/insightsEngine.js
+new file mode 100644
+index 0000000..f9e776f
+--- /dev/null
++++ b/src/utils/insightsEngine.js
+@@ -0,0 +1,80 @@
++// ─── INSIGHTS ENGINE ────────────────────────────────────────────────────────
++// Rule-based statistics (trends, outliers, simple forecasts) computed purely
++// from the app's own historical data — no training data or ML model needed.
++// These are the building blocks for both the on-screen flags/forecasts and
++// the summary handed to the AI recommendations feature.
++
++export function monthKey(dateStr) {
++  if (!dateStr) return null;
++  return dateStr.slice(0, 7); // 'YYYY-MM'
++}
++
++// Groups records by month, summing a numeric field. Returns chronological
++// [{month:'YYYY-MM', total}] — only months with at least one record.
++export function monthlySeries(records, dateField, amountField) {
++  const map = {};
++  records.forEach(r => {
++    const mk = monthKey(r[dateField]);
++    if (!mk) return;
++    map[mk] = (map[mk] || 0) + (Number(r[amountField]) || 0);
++  });
++  return Object.entries(map)
++    .map(([month, total]) => ({ month, total }))
++    .sort((a, b) => a.month.localeCompare(b.month));
++}
++
++// % change of the latest month vs the one before it. null if fewer than 2
++// months of data exist yet.
++export function momChange(series) {
++  if (series.length < 2) return null;
++  const latest = series[series.length - 1].total;
++  const prev = series[series.length - 2].total;
++  if (prev === 0) return null;
++  return { latestMonth: series[series.length - 1].month, prevMonth: series[series.length - 2].month, latest, prev, pctChange: ((latest - prev) / Math.abs(prev)) * 100 };
++}
++
++function mean(arr) { return arr.length ? arr.reduce((s, x) => s + x, 0) / arr.length : 0; }
++function stdDev(arr) {
++  if (arr.length < 2) return 0;
++  const m = mean(arr);
++  return Math.sqrt(arr.reduce((s, x) => s + (x - m) ** 2, 0) / arr.length);
++}
++
++// Flags entries whose value deviates more than `threshold` standard
++// deviations from the mean of the group — e.g. one agent's rate sitting far
++// outside the norm of all agents, or one month's cost spiking vs the rest.
++export function findOutliers(items, valueFn, labelFn, threshold = 1.5) {
++  const values = items.map(valueFn);
++  if (values.length < 3) return []; // not enough data to call anything an outlier
++  const m = mean(values);
++  const sd = stdDev(values);
++  if (sd === 0) return [];
++  return items
++    .map((it, i) => ({ label: labelFn(it), value: values[i], deviation: (values[i] - m) / sd }))
++    .filter(x => Math.abs(x.deviation) >= threshold)
++    .sort((a, b) => Math.abs(b.deviation) - Math.abs(a.deviation));
++}
++
++// Simple linear-trend forecast for the next `periods` months, based on a
++// monthly series. Uses ordinary least-squares on (index, total) — enough
++// signal for a small business's month-to-month trend without needing a
++// real ML model. Returns null if there's too little history to trust.
++export function forecastNext(series, periods = 1) {
++  if (series.length < 3) return null;
++  const n = series.length;
++  const xs = series.map((_, i) => i);
++  const ys = series.map(s => s.total);
++  const xMean = mean(xs), yMean = mean(ys);
++  const num = xs.reduce((s, x, i) => s + (x - xMean) * (ys[i] - yMean), 0);
++  const den = xs.reduce((s, x) => s + (x - xMean) ** 2, 0);
++  const slope = den === 0 ? 0 : num / den;
++  const intercept = yMean - slope * xMean;
++  const recentAvg = mean(ys.slice(-3)); // blend trend with recent average, avoids wild extrapolation
++  const forecasts = [];
++  for (let p = 1; p <= periods; p++) {
++    const trendVal = intercept + slope * (n - 1 + p);
++    const blended = (trendVal + recentAvg) / 2;
++    forecasts.push(Math.max(0, blended));
++  }
++  return { slope, recentAvg, forecasts };
++}
+diff --git a/src/utils/rentalInsights.js b/src/utils/rentalInsights.js
+new file mode 100644
+index 0000000..d25e490
+--- /dev/null
++++ b/src/utils/rentalInsights.js
+@@ -0,0 +1,69 @@
++import { monthlySeries, momChange, findOutliers, forecastNext } from './insightsEngine';
++
++export function rentalInsights(transactions, properties) {
++  const flags = [];
++  const income = transactions.filter(t => t.type === 'income');
++  const expense = transactions.filter(t => t.type === 'expense');
++
++  // 1. Net income trend
++  const incomeSeries = monthlySeries(income, 'date', 'amount');
++  const expenseSeries = monthlySeries(expense, 'date', 'amount');
++  const months = [...new Set([...incomeSeries.map(s=>s.month), ...expenseSeries.map(s=>s.month)])].sort();
++  const netSeries = months.map(m => ({
++    month: m,
++    total: (incomeSeries.find(s=>s.month===m)?.total||0) - (expenseSeries.find(s=>s.month===m)?.total||0),
++  }));
++  const netChange = momChange(netSeries);
++  if (netChange) {
++    const dir = netChange.pctChange >= 0 ? 'improved' : 'declined';
++    flags.push({
++      severity: Math.abs(netChange.pctChange) >= 25 ? 'high' : 'medium',
++      area: 'Net Income',
++      text: `Net rental income ${dir} ${Math.abs(netChange.pctChange).toFixed(0)}% in ${netChange.latestMonth} (₹${netChange.latest.toFixed(0)}) vs ${netChange.prevMonth} (₹${netChange.prev.toFixed(0)}).`,
++    });
++  }
++
++  // 2. Expense category spike — this month vs each category's own historical average
++  const expenseByCategory = {};
++  expense.forEach(t => {
++    const cat = t.category || 'Other';
++    if (!expenseByCategory[cat]) expenseByCategory[cat] = [];
++    expenseByCategory[cat].push(t);
++  });
++  const latestMonth = months[months.length - 1];
++  Object.entries(expenseByCategory).forEach(([cat, txs]) => {
++    const series = monthlySeries(txs, 'date', 'amount');
++    if (series.length < 3) return;
++    const latest = series.find(s => s.month === latestMonth);
++    if (!latest) return;
++    const priorAvg = series.filter(s => s.month !== latestMonth).reduce((s,x)=>s+x.total,0) / Math.max(1, series.length - 1);
++    if (priorAvg > 0 && latest.total > priorAvg * 1.4) {
++      flags.push({
++        severity: latest.total > priorAvg * 2 ? 'high' : 'medium',
++        area: 'Expense Category',
++        text: `${cat} expenses this month (₹${latest.total.toFixed(0)}) are well above the usual average (₹${priorAvg.toFixed(0)}).`,
++      });
++    }
++  });
++
++  // 3. Property profitability ranking
++  const propStats = (properties || []).map(p => {
++    const pIncome = income.filter(t => t.propertyId === p.id).reduce((s,t)=>s+(t.amount||0),0);
++    const pExpense = expense.filter(t => t.propertyId === p.id).reduce((s,t)=>s+(t.amount||0),0);
++    return { name: p.name, net: pIncome - pExpense, income: pIncome, expense: pExpense };
++  }).filter(p => p.income > 0 || p.expense > 0);
++  findOutliers(propStats, x => x.net, x => x.name, 1.2).forEach(o => {
++    if (o.deviation < 0) {
++      flags.push({
++        severity: 'medium',
++        area: 'Property Performance',
++        text: `${o.label} is underperforming your other properties (net ₹${o.value.toFixed(0)}) — worth reviewing its expenses or rent.`,
++      });
++    }
++  });
++
++  // 4. Net income forecast
++  const netForecast = forecastNext(netSeries, 1);
++
++  return { flags, incomeSeries, expenseSeries, netSeries, netForecast, propStats };
++}
+diff --git a/src/utils/teaInsights.js b/src/utils/teaInsights.js
+new file mode 100644
+index 0000000..4c97190
+--- /dev/null
++++ b/src/utils/teaInsights.js
+@@ -0,0 +1,108 @@
++import { monthlySeries, momChange, findOutliers, forecastNext } from './insightsEngine';
++import { costPerKgBreakdown, workerWageSummary, agentPendingBreakdown } from './chaayaService';
++
++// Builds a monthly cost-per-kg series so trend/forecast logic can work off
++// it, reusing the same math as the Market Rates breakdown but bucketed by
++// month instead of a single period.
++function monthlyCostPerKg(harvest, maintenance, inventory) {
++  const months = new Set();
++  harvest.forEach(h => h.date && months.add(h.date.slice(0, 7)));
++  return [...months].sort().map(mk => {
++    const hMonth = harvest.filter(h => h.date && h.date.slice(0, 7) === mk);
++    const mMonth = maintenance.filter(m => m.date && m.date.slice(0, 7) === mk);
++    const iMonth = inventory.filter(p => p.date && p.date.slice(0, 7) === mk);
++    const cpk = costPerKgBreakdown(hMonth, mMonth, iMonth);
++    return { month: mk, total: cpk.netMarginPerKg };
++  });
++}
++
++export function teaInsights(harvest, maintenance, inventory, advances, settlements, agentPayments, workerList) {
++  const flags = [];
++
++  // 1. Cost-per-kg (margin) trend
++  const marginSeries = monthlyCostPerKg(harvest, maintenance, inventory);
++  const marginChange = momChange(marginSeries);
++  if (marginChange) {
++    const dir = marginChange.pctChange >= 0 ? 'improved' : 'dropped';
++    flags.push({
++      severity: Math.abs(marginChange.pctChange) >= 15 ? 'high' : 'medium',
++      area: 'Margin',
++      text: `Net margin per kg ${dir} ${Math.abs(marginChange.pctChange).toFixed(0)}% in ${marginChange.latestMonth} (₹${marginChange.latest.toFixed(2)}/kg) vs ${marginChange.prevMonth} (₹${marginChange.prev.toFixed(2)}/kg).`,
++    });
++  }
++
++  // 2. Agent rate outliers — is one agent paying noticeably less/more per kg?
++  const agentTotals = {};
++  harvest.forEach(h => {
++    if (!h.agent || !h.rate) return;
++    if (!agentTotals[h.agent]) agentTotals[h.agent] = { kg: 0, rev: 0 };
++    agentTotals[h.agent].kg += h.tNet || 0;
++    agentTotals[h.agent].rev += h.agentRev || 0;
++  });
++  const agentAvgRates = Object.entries(agentTotals)
++    .filter(([, v]) => v.kg > 0)
++    .map(([agent, v]) => ({ agent, avgRate: v.rev / v.kg }));
++  findOutliers(agentAvgRates, x => x.avgRate, x => x.agent, 1.2).forEach(o => {
++    flags.push({
++      severity: Math.abs(o.deviation) >= 2 ? 'high' : 'medium',
++      area: 'Agent Rate',
++      text: `${o.label}'s average rate (₹${o.value.toFixed(2)}/kg) is ${o.deviation > 0 ? 'notably higher' : 'notably lower'} than your other agents — worth a quick check.`,
++    });
++  });
++
++  // 3. Worker payment backlog
++  const workerBacklog = (workerList || [])
++    .map(w => ({ worker: w, outstanding: workerWageSummary(w, harvest, advances, settlements).outstanding }))
++    .filter(w => w.outstanding > 0)
++    .sort((a, b) => b.outstanding - a.outstanding);
++  if (workerBacklog.length > 0) {
++    const top = workerBacklog[0];
++    flags.push({
++      severity: top.outstanding > 5000 ? 'high' : 'low',
++      area: 'Worker Payments',
++      text: `${workerBacklog.length} worker${workerBacklog.length!==1?'s have':' has'} unpaid wages — largest is ${top.worker} at ₹${top.outstanding.toFixed(0)}.`,
++    });
++  }
++
++  // 4. Agent payment backlog
++  const agentBreakdown = agentPendingBreakdown(harvest, agentPayments).filter(a => a.pending > 0.5);
++  if (agentBreakdown.length > 0) {
++    const totalPending = agentBreakdown.reduce((s, a) => s + a.pending, 0);
++    flags.push({
++      severity: totalPending > 10000 ? 'high' : 'low',
++      area: 'Agent Payments',
++      text: `₹${totalPending.toFixed(0)} pending across ${agentBreakdown.length} agent${agentBreakdown.length!==1?'s':''}.`,
++    });
++  }
++
++  // 5. Maintenance cost spike (incl. inventory purchases)
++  const maintCombined = [
++    ...maintenance.map(m => ({ date: m.date, cost: m.cost || 0 })),
++    ...inventory.map(p => ({ date: p.date, cost: p.totalCost || 0 })),
++  ];
++  const maintSeries = monthlySeries(maintCombined, 'date', 'cost');
++  const maintChange = momChange(maintSeries);
++  if (maintChange && maintChange.pctChange >= 25) {
++    flags.push({
++      severity: maintChange.pctChange >= 50 ? 'high' : 'medium',
++      area: 'Maintenance Cost',
++      text: `Maintenance & purchases jumped ${maintChange.pctChange.toFixed(0)}% in ${maintChange.latestMonth} (₹${maintChange.latest.toFixed(0)}) vs ${maintChange.prevMonth} (₹${maintChange.prev.toFixed(0)}).`,
++    });
++  }
++
++  // 6. Advance buildup
++  const pendingAdvTotal = advances.filter(a => !a.deducted).reduce((s, a) => s + (a.amount || 0), 0);
++  if (pendingAdvTotal > 0) {
++    flags.push({
++      severity: pendingAdvTotal > 10000 ? 'medium' : 'low',
++      area: 'Worker Advances',
++      text: `₹${pendingAdvTotal.toFixed(0)} in worker advances still pending deduction.`,
++    });
++  }
++
++  // 7. Harvest volume forecast (net kg per month)
++  const kgSeries = monthlySeries(harvest, 'date', 'tNet');
++  const kgForecast = forecastNext(kgSeries, 1);
++
++  return { flags, marginSeries, kgSeries, kgForecast, maintSeries };
++}
