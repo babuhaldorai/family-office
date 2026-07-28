@@ -95,7 +95,12 @@ const itemsTotals=(items)=>{
   })).filter(it=>it.bags>0||it.rate>0);
   const totalBags=clean.reduce((s,it)=>s+it.bags,0);
   const bagCost=clean.reduce((s,it)=>s+it.bags*it.rate,0);
-  return {items:clean,totalBags,bagCost};
+  // Items drawn from inventory were already paid for when the bulk purchase
+  // was logged — counting their cost again here would double-count that
+  // spend. Only "direct" (not from inventory) items count as new cost now.
+  const directBagCost=clean.filter(it=>!it.purchaseId).reduce((s,it)=>s+it.bags*it.rate,0);
+  const inventoryBagCost=bagCost-directBagCost;
+  return {items:clean,totalBags,bagCost,directBagCost,inventoryBagCost};
 };
 
 // ── ADVANCES TAB ──────────────────────────────────────────────────────────────
@@ -187,8 +192,12 @@ export function MaintenanceTab({isAdmin,maintenance,workerList,fieldList,invento
     if(!pForm.itemName)return alert('Enter an item name');
     const totalUnits=parseFloat(pForm.totalUnits)||0, unitCost=parseFloat(pForm.unitCost)||0;
     if(totalUnits<=0)return alert('Enter total units purchased');
-    await onSavePurchase({...pForm,totalUnits,unitCost,totalCost:totalUnits*unitCost});
-    setPForm(f=>({...f,itemName:'',totalUnits:'',unitCost:'',notes:''}));
+    try{
+      await onSavePurchase({...pForm,totalUnits,unitCost,totalCost:totalUnits*unitCost});
+      setPForm(f=>({...f,itemName:'',totalUnits:'',unitCost:'',notes:''}));
+    }catch(e){
+      alert('❌ Failed to save purchase: '+e.message);
+    }
   };
 
   const save=async()=>{
@@ -196,15 +205,15 @@ export function MaintenanceTab({isAdmin,maintenance,workerList,fieldList,invento
     let cost=rate*days;
     let itemData={};
     if(form.task==='Fertilizing'){
-      const {items,totalBags,bagCost}=itemsTotals(form.fertItems);
+      const {items,totalBags,bagCost,directBagCost}=itemsTotals(form.fertItems);
       const labourCost=rate*days;
-      cost=bagCost+labourCost;
-      itemData={fertItems:items,totalBags,bagCost,labourCost,fertCost:cost};
+      cost=directBagCost+labourCost; // inventory-sourced bag cost already counted at purchase time
+      itemData={fertItems:items,totalBags,bagCost,directBagCost,labourCost,fertCost:cost};
     } else if(form.task==='Harvesting Equipment'){
-      const {items,totalBags,bagCost}=itemsTotals(form.equipItems);
+      const {items,totalBags,bagCost,directBagCost}=itemsTotals(form.equipItems);
       const labourCost=rate*days;
-      cost=bagCost+labourCost;
-      itemData={equipItems:items,totalBags,bagCost,labourCost};
+      cost=directBagCost+labourCost;
+      itemData={equipItems:items,totalBags,bagCost,directBagCost,labourCost};
     }
     const d2=form.date?new Date(form.date):new Date();
     await onSave({
@@ -215,6 +224,8 @@ export function MaintenanceTab({isAdmin,maintenance,workerList,fieldList,invento
     setForm(f=>({...f,rate:'',notes:'',fertItems:[newItem()],equipItems:[newItem()]}));
   };
   const total=maintenance.reduce((s,e)=>s+(e.cost||0),0);
+  const inventoryTotal=inventory.reduce((s,p)=>s+(p.totalCost||0),0);
+  const grandTotal=total+inventoryTotal;
   return(
     <div>
       {isAdmin&&(
@@ -226,6 +237,12 @@ export function MaintenanceTab({isAdmin,maintenance,workerList,fieldList,invento
           <div style={{fontSize:'0.78rem',color:'var(--muted)',marginTop:4}}>
             Log a fertilizer or equipment purchase once, then draw from it across different fields over time below.
           </div>
+          {inventory.length>0&&(
+            <div style={{marginTop:8,fontSize:13}}>
+              Total spent on purchases so far: <strong style={{color:'var(--accent)'}}>{inr(inventoryTotal)}</strong>
+              <span style={{color:'var(--muted)'}}> — counted immediately below (and in Market Rates cost-per-kg), even before it's used on a field.</span>
+            </div>
+          )}
           {showInventory&&(
             <div style={{marginTop:12}}>
               <div className="ch-grid-4" style={{marginBottom:10}}>
@@ -296,12 +313,13 @@ export function MaintenanceTab({isAdmin,maintenance,workerList,fieldList,invento
               <div style={{fontWeight:600,fontSize:'0.85rem',marginBottom:4,color:'var(--text)'}}>🌿 Fertilizer Bags</div>
               <div style={{fontSize:'0.78rem',color:'var(--muted)',marginBottom:10}}>Labour is logged separately as worker days above. Pick "From Inventory" to draw from a bulk purchase already logged above.</div>
               <ItemsEditor items={form.fertItems} onChange={items=>set('fertItems',items)} category="Fertilizer" presetTypes={FERT_TYPES} inventoryOptions={fertPurchases}/>
-            {(()=>{const {totalBags,bagCost}=itemsTotals(form.fertItems);return(
+            {(()=>{const {totalBags,directBagCost,inventoryBagCost}=itemsTotals(form.fertItems);return(
               <div style={{marginTop:2,padding:'10px 12px',background:'var(--surface)',borderRadius:'var(--radius)',fontSize:13,display:'flex',gap:20,flexWrap:'wrap'}}>
                 <span>Total bags: <strong>{totalBags}</strong></span>
-                <span>Bag cost: <strong style={{color:'var(--warn)'}}>{inr(bagCost)}</strong></span>
+                <span>New bag cost: <strong style={{color:'var(--warn)'}}>{inr(directBagCost)}</strong></span>
+                {inventoryBagCost>0&&<span>From stock (already paid): <strong style={{color:'var(--muted)'}}>{inr(inventoryBagCost)}</strong></span>}
                 {(form.days&&form.rate)&&<span>Labour: <strong style={{color:'var(--warn)'}}>{inr((parseFloat(form.days)||0)*(parseFloat(form.rate)||0))}</strong></span>}
-                {(form.days&&form.rate)&&<span>Session total: <strong style={{color:'var(--accent)'}}>{inr(bagCost+(parseFloat(form.days)||0)*(parseFloat(form.rate)||0))}</strong></span>}
+                {(form.days&&form.rate)&&<span>Session total (new cost): <strong style={{color:'var(--accent)'}}>{inr(directBagCost+(parseFloat(form.days)||0)*(parseFloat(form.rate)||0))}</strong></span>}
               </div>
             );})()}
             </div>
@@ -312,20 +330,21 @@ export function MaintenanceTab({isAdmin,maintenance,workerList,fieldList,invento
               <div style={{fontWeight:600,fontSize:'0.85rem',marginBottom:4,color:'var(--text)'}}>🔧 Equipment</div>
               <div style={{fontSize:'0.78rem',color:'var(--muted)',marginBottom:10}}>Labour is logged separately as worker days above. Pick "From Inventory" to draw from equipment already purchased in bulk.</div>
               <ItemsEditor items={form.equipItems} onChange={items=>set('equipItems',items)} category="Equipment" presetTypes={null} inventoryOptions={equipPurchases}/>
-            {(()=>{const {totalBags,bagCost}=itemsTotals(form.equipItems);return(
+            {(()=>{const {totalBags,directBagCost,inventoryBagCost}=itemsTotals(form.equipItems);return(
               <div style={{marginTop:2,padding:'10px 12px',background:'var(--surface)',borderRadius:'var(--radius)',fontSize:13,display:'flex',gap:20,flexWrap:'wrap'}}>
                 <span>Total units: <strong>{totalBags}</strong></span>
-                <span>Item cost: <strong style={{color:'var(--warn)'}}>{inr(bagCost)}</strong></span>
+                <span>New item cost: <strong style={{color:'var(--warn)'}}>{inr(directBagCost)}</strong></span>
+                {inventoryBagCost>0&&<span>From stock (already paid): <strong style={{color:'var(--muted)'}}>{inr(inventoryBagCost)}</strong></span>}
                 {(form.days&&form.rate)&&<span>Labour: <strong style={{color:'var(--warn)'}}>{inr((parseFloat(form.days)||0)*(parseFloat(form.rate)||0))}</strong></span>}
-                {(form.days&&form.rate)&&<span>Session total: <strong style={{color:'var(--accent)'}}>{inr(bagCost+(parseFloat(form.days)||0)*(parseFloat(form.rate)||0))}</strong></span>}
+                {(form.days&&form.rate)&&<span>Session total (new cost): <strong style={{color:'var(--accent)'}}>{inr(directBagCost+(parseFloat(form.days)||0)*(parseFloat(form.rate)||0))}</strong></span>}
               </div>
             );})()}
             </div>
           )}
-          {(form.task==='Fertilizing'||form.task==='Harvesting Equipment')&&form.rate&&form.days&&(()=>{const {bagCost}=itemsTotals(form.task==='Fertilizing'?form.fertItems:form.equipItems);return(
+          {(form.task==='Fertilizing'||form.task==='Harvesting Equipment')&&form.rate&&form.days&&(()=>{const {directBagCost}=itemsTotals(form.task==='Fertilizing'?form.fertItems:form.equipItems);return(
             <div style={{fontSize:13,color:'var(--text)',marginBottom:10,padding:'6px 10px',background:'var(--surface2)',borderRadius:'var(--radius)'}}>
               Labour: <strong>{inr((parseFloat(form.rate)||0)*(parseFloat(form.days)||1))}</strong>
-              {' · '}Total (items+labour): <strong style={{color:'var(--accent)'}}>{inr(bagCost+(parseFloat(form.rate)||0)*(parseFloat(form.days)||1))}</strong>
+              {' · '}Total (new cost, items+labour): <strong style={{color:'var(--accent)'}}>{inr(directBagCost+(parseFloat(form.rate)||0)*(parseFloat(form.days)||1))}</strong>
             </div>
           );})()}
           {form.task!=='Fertilizing'&&form.task!=='Harvesting Equipment'&&form.rate&&form.days&&<div style={{fontSize:13,color:'var(--text)',marginBottom:10}}>Cost: <strong>{inr((parseFloat(form.rate)||0)*(parseFloat(form.days)||1))}</strong></div>}
@@ -366,7 +385,9 @@ export function MaintenanceTab({isAdmin,maintenance,workerList,fieldList,invento
                 {isAdmin&&<td><button className="ch-btn ch-btn-danger ch-btn-sm" onClick={()=>onDelete(e.id)}>✕</button></td>}
               </tr>
             );})}
-            {maintenance.length>0&&<tr style={{background:'var(--surface2)',fontWeight:600}}><td colSpan={6} style={{textAlign:'right',color:'var(--muted)'}}>Total</td><td style={{fontFamily:'var(--font-mono)'}}>{inr(total)}</td>{isAdmin&&<td/>}</tr>}
+            {maintenance.length>0&&<tr style={{background:'var(--surface2)',fontWeight:600}}><td colSpan={6} style={{textAlign:'right',color:'var(--muted)'}}>Maintenance Log Total (labour + direct materials)</td><td style={{fontFamily:'var(--font-mono)'}}>{inr(total)}</td>{isAdmin&&<td/>}</tr>}
+            {inventoryTotal>0&&<tr style={{background:'var(--surface2)'}}><td colSpan={6} style={{textAlign:'right',color:'var(--muted)'}}>+ Inventory Purchases (not yet in a field entry)</td><td style={{fontFamily:'var(--font-mono)',color:'var(--muted)'}}>{inr(inventoryTotal)}</td>{isAdmin&&<td/>}</tr>}
+            {(maintenance.length>0||inventoryTotal>0)&&<tr style={{background:'var(--surface2)',fontWeight:700,borderTop:'2px solid var(--border)'}}><td colSpan={6} style={{textAlign:'right',color:'var(--text)'}}>Grand Total</td><td style={{fontFamily:'var(--font-mono)',color:'var(--accent)'}}>{inr(grandTotal)}</td>{isAdmin&&<td/>}</tr>}
           </tbody>
         </table>
       </div>
@@ -415,13 +436,14 @@ export function WeatherTab({isAdmin,weather,onSave,onDelete}){
 }
 
 // ── RATES TAB ─────────────────────────────────────────────────────────────────
-export function RatesTab({harvest,maintenance=[]}){
+export function RatesTab({harvest,maintenance=[],inventory=[]}){
   const [period, setPeriod] = useState({ preset: 'all', ...periodBounds('all') });
   const filteredHarvest = getFilteredHarvest(harvest, period);
   const filteredMaintenance = maintenance.filter(m => m.date && m.date >= (period.from||'2000-01-01') && m.date <= (period.to||'2099-12-31'));
+  const filteredInventory = inventory.filter(p => p.date && p.date >= (period.from||'2000-01-01') && p.date <= (period.to||'2099-12-31'));
 
   const rows = agentRateLog(filteredHarvest);
-  const cpk = costPerKgBreakdown(filteredHarvest, filteredMaintenance);
+  const cpk = costPerKgBreakdown(filteredHarvest, filteredMaintenance, filteredInventory);
   const waterfall = [
     ['Avg Rate (revenue)', cpk.avgRate, 'var(--success)', false],
     ['− Bag/Water Deduction Loss', cpk.deductionLossPerKg, 'var(--danger)', true],

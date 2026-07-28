@@ -26,7 +26,7 @@ export default function HarvestHub({
   editHarvestEntry, deleteHarvestEntry, onUpdateRate, onUpdateWorkerPay, onUpdateAgentPay, onPayWorkerNetOfAdvance, onPayWorkerFull,
   onDeleteSettlement, onDeleteAgentPayment, onResetWorkerLog, onResetAgentLog,
   // settlements (worker + agent) props
-  harvest, settlements, advances, agentPayments, maintenance,
+  harvest, settlements, advances, agentPayments, maintenance, inventory,
   // sub-tab control (optional — defaults to internal state)
   subTab, setSubTab,
 }) {
@@ -90,7 +90,7 @@ export default function HarvestHub({
         />
       )}
 
-      {sub === 'rates' && <RatesTab harvest={harvest} maintenance={maintenance} />}
+      {sub === 'rates' && <RatesTab harvest={harvest} maintenance={maintenance} inventory={inventory} />}
 
       {sub === 'worker' && (
         <SettlementsTab

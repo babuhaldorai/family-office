@@ -384,7 +384,7 @@ export function lastKnownRate(harvest, agent) {
 // bag/water deduction loss, worker wages, and field maintenance — both in
 // aggregate and broken down by individual maintenance task (fertilizer,
 // pruning, etc.) — leaving the actual net margin per kg harvested.
-export function costPerKgBreakdown(harvest, maintenance) {
+export function costPerKgBreakdown(harvest, maintenance, inventory=[]) {
   const totalNetKg     = harvest.reduce((s,h)=>s+(h.tNet||0),0);
   const totalGrossKg   = harvest.reduce((s,h)=>s+(h.tGross||0),0);
   const totalBagDed    = harvest.reduce((s,h)=>s+(h.tBagDed||0),0);
@@ -402,11 +402,17 @@ export function costPerKgBreakdown(harvest, maintenance) {
 
   const workerPerKg = totalNetKg > 0 ? totalWorkerPay / totalNetKg : 0;
 
-  const totalMaintenance = maintenance.reduce((s,m)=>s+(m.cost||0),0);
+  // Bulk inventory purchases count as spent the moment they're bought, not
+  // only once used on a field — otherwise unused stock would understate
+  // real spend. Maintenance log entries already exclude inventory-sourced
+  // item cost (see itemsTotals/directBagCost) so this doesn't double-count.
+  const inventoryTotal = inventory.reduce((s,p)=>s+(p.totalCost||0),0);
+  const totalMaintenance = maintenance.reduce((s,m)=>s+(m.cost||0),0) + inventoryTotal;
   const maintenancePerKg = totalNetKg > 0 ? totalMaintenance / totalNetKg : 0;
 
   const byTask = {};
   maintenance.forEach(m => { const t = m.task || 'Other'; byTask[t] = (byTask[t]||0) + (m.cost||0); });
+  if (inventoryTotal > 0) byTask['Inventory Purchases (unused stock included)'] = (byTask['Inventory Purchases (unused stock included)']||0) + inventoryTotal;
   const taskBreakdown = Object.entries(byTask)
     .map(([task,cost]) => ({ task, cost, perKg: totalNetKg > 0 ? cost/totalNetKg : 0 }))
     .sort((a,b) => b.cost - a.cost);

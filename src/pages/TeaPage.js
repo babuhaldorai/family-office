@@ -507,7 +507,7 @@ Deleting it will allow transactions on this field again. Are you sure?`);
             onUpdateAgentPay={updateHarvestAgentPay}
             onPayWorkerNetOfAdvance={payWorkerRowNetOfAdvance}
             onPayWorkerFull={payWorkerRowFull}
-            harvest={harvest} settlements={settlements} advances={advances} agentPayments={agentPayments} maintenance={maintenance}
+            harvest={harvest} settlements={settlements} advances={advances} agentPayments={agentPayments} maintenance={maintenance} inventory={inventory}
             onDeleteSettlement={deleteSettlementRecord}
             onDeleteAgentPayment={deleteAgentPaymentRecord}
             onResetWorkerLog={resetWorkerPaymentsForDate}
@@ -540,8 +540,13 @@ Deleting it will allow transactions on this field again. Are you sure?`);
             }}
             onDelete={id => { if (window.confirm('Delete?')) maintenanceService.delete(id).then(()=>writeAudit('delete','tea_maintenance',`Deleted maintenance record ${id}`)); }}
             onSavePurchase={async data => {
-              await inventoryService.add(data);
-              writeAudit('create','tea_inventory',`Logged purchase: ${data.itemName} × ${data.totalUnits} @ ₹${data.unitCost}`);
+              try {
+                await inventoryService.add(data);
+                writeAudit('create','tea_inventory',`Logged purchase: ${data.itemName} × ${data.totalUnits} @ ₹${data.unitCost}`);
+              } catch (e) {
+                alert('Failed to save purchase: ' + e.message);
+                throw e;
+              }
             }}
             onDeletePurchase={id => { if (window.confirm('Delete this purchase record?')) inventoryService.delete(id).then(()=>writeAudit('delete','tea_inventory',`Deleted inventory purchase ${id}`)); }}
           />
