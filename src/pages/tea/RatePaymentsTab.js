@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { inr } from '../../utils/chaayaService';
+import { inr, payBasisLabel } from '../../utils/chaayaService';
 import { EditableRateCell, EditablePayCell } from './InlineEditCells';
 
 // Per-session rate confirmation and worker/agent payment entry — split out
@@ -132,7 +132,7 @@ export default function RatePaymentsTab({
                   <tr key={e.id}>
                     <td>{e.date}</td><td>{e.worker}</td><td>{e.agent}</td>
                     <td>{(e.tNet||0).toFixed(1)}</td>
-                    <td style={{color:'var(--success)'}}>{inr(e.workerPay||0)}</td>
+                    <td style={{color:'var(--success)'}}>{inr(e.workerPay||0)}{e.payBasis==='daily'&&<div style={{fontSize:'0.7rem',color:'var(--muted)'}}>{payBasisLabel(e)}</div>}</td>
                     <td>{advance>0 ? <span className="ch-badge ch-badge-gold" title="Pending advance as of this session's date">−{inr(advance)}</span> : <span style={{color:'var(--muted)'}}>—</span>}</td>
                     <td><EditablePayCell id={e.id} paidAmount={e.workerPayAmount} paidDate={e.workerPayDate} total={e.workerPay} onUpdate={onUpdateWorkerPay} advance={advance} onMarkPaidWithAdvance={()=>onPayWorkerNetOfAdvance(e.id)} onMarkPaidFull={()=>onPayWorkerFull(e.id)}/></td>
                     <td><EditableRateCell id={e.id} rate={e.rate} rateStatus={e.rateStatus} onUpdateRate={onUpdateRate}/></td>

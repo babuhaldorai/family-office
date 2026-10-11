@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import BagBuilder from './BagBuilder';
+import { WORKER_KG_RATE, payBasisLabel } from '../../utils/chaayaService';
 
 export default function HarvestTab({
   isAdmin,leasedFields=new Set(),bags,setBags,deductMode,setDeductMode,
-  hDate,setHDate,hWorker,setHWorker,hField,setHField,hAgent,setHAgent,
+  hDate,setHDate,hWorker,setHWorker,hPay={basis:'kg',days:1,dayRate:''},setHPay=()=>{},hField,setHField,hAgent,setHAgent,
   workerList,agentList,fieldList,rates,editingHarvestId,
   saveHarvest,savingHarvest,clearForm,
   filteredHarvest,harvestFilter,setHarvestFilter,harvestWeeks,
@@ -84,8 +85,31 @@ export default function HarvestTab({
                 {agentList.map(a=><option key={a}>{a}</option>)}
               </select></div>
           </div>
+          <div className="ch-grid-4" style={{marginBottom:14}}>
+            <div className="ch-form-group"><label>Worker pay</label>
+              <select className="ch-input" value={hPay.basis}
+                onChange={e=>setHPay(p=>({...p,basis:e.target.value}))}>
+                <option value="kg">Per kg (₹{WORKER_KG_RATE}/kg)</option>
+                <option value="daily">Daily wage</option>
+              </select></div>
+            {hPay.basis==='daily'&&(
+              <>
+                <div className="ch-form-group"><label>Days worked</label>
+                  <input className="ch-input" type="number" min="0" step="0.5" value={hPay.days}
+                    onChange={e=>setHPay(p=>({...p,days:e.target.value}))}/></div>
+                <div className="ch-form-group"><label>Daily wage (₹)</label>
+                  <input className="ch-input" type="number" min="0" step="10" placeholder="e.g. 500" value={hPay.dayRate}
+                    onChange={e=>setHPay(p=>({...p,dayRate:e.target.value}))}/></div>
+              </>
+            )}
+          </div>
+          {hPay.basis==='daily'&&(
+            <div style={{fontSize:'0.75rem',color:'var(--muted)',marginTop:-8,marginBottom:12}}>
+              Paid a fixed day's wage for this session, whatever the kg. If the same worker has two sessions on one day, set days to 0 on the second so the wage isn't counted twice.
+            </div>
+          )}
           <BagBuilder bags={bags} onChange={setBags} deductMode={deductMode} onDeductModeChange={setDeductMode}
-            agentName={hAgent} dateStr={hDate} rates={rates}/>
+            agentName={hAgent} dateStr={hDate} rates={rates} pay={hPay}/>
           <div style={{display:'flex',gap:10,marginTop:14}}>
             <button className="ch-btn ch-btn-primary" onClick={saveHarvest} disabled={savingHarvest||!bags.length}>
               {savingHarvest?(editingHarvestId?'Updating…':'Saving…'):(editingHarvestId?'Update Harvest':'Save Harvest')}
@@ -179,7 +203,8 @@ export default function HarvestTab({
                 const noBagDed = !(e.tBagDed>0);
                 return (
                 <tr key={e.id} style={noBagDed?{background:'rgba(224,146,74,0.08)'}:undefined}>
-                  <td>{e.date}</td><td>{e.worker}</td>
+                  <td>{e.date}</td>
+                  <td>{e.worker}{e.payBasis==='daily'&&<div style={{fontSize:'0.7rem',color:'var(--muted)'}}>Daily · {payBasisLabel(e)}</div>}</td>
                   <td><span className="ch-badge ch-badge-green">{e.field}</span></td>
                   <td>{e.agent}</td>
                   <td><span className="ch-badge ch-badge-blue">{e.bags} bags</span></td>

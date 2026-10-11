@@ -39,6 +39,35 @@ export function weekLabel(d) {
 
 export function todayStr() { return new Date().toISOString().split('T')[0]; }
 
+// ─── Worker pay ──────────────────────────────────────────────────────────────
+// A harvest session pays its worker one of two ways:
+//   'kg'    — net kg × WORKER_KG_RATE (the original Chaaya rule)
+//   'daily' — workDays × dayRate, regardless of kg picked
+// Older harvest rows have no payBasis and are treated as 'kg'. Everything
+// downstream (P&L, settlements, unpaid wages, cost per kg) reads the stored
+// workerPay, so both bases flow through the same reports.
+export const WORKER_KG_RATE = 6;
+
+export function calcWorkerPay({ basis = 'kg', tNet = 0, days = 1, dayRate = 0 } = {}) {
+  if (basis === 'daily') return Math.round((parseFloat(days) || 0) * (parseFloat(dayRate) || 0));
+  return Math.round((parseFloat(tNet) || 0) * WORKER_KG_RATE);
+}
+
+// Default pay settings for a worker, from their profile.
+export function workerPayDefaults(worker) {
+  const daily = worker?.payBasis === 'daily';
+  return { basis: daily ? 'daily' : 'kg', days: 1, dayRate: daily ? String(worker.dailyRate || '') : '' };
+}
+
+// Short description of how a session or worker is paid, e.g. "₹6/kg" or "1 day × ₹500".
+export function payBasisLabel(h) {
+  if (h?.payBasis === 'daily') {
+    const d = h.workDays ?? 1;
+    return `${d} day${d === 1 ? '' : 's'} × ${inr(h.dayRate)}`;
+  }
+  return `₹${WORKER_KG_RATE}/kg`;
+}
+
 export function calcBagNet(b) {
   return Math.max(0, (b.gross || 0) - (b.bagWt || 0) - (b.waterKg || 0));
 }

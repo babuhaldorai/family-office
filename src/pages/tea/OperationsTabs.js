@@ -1,6 +1,6 @@
 import React,{useState} from 'react';
 import {inr,todayStr,agentRateLog,costPerKgBreakdown,periodBounds,periodLabel,getFilteredHarvest,inventoryWithRemaining} from '../../utils/chaayaService';
-import PeriodBar from './PeriodBar';
+import PeriodBar from './TeaPeriodBar';
 
 
 const MAINT_TASKS=['Pruning','Cleaning','Weeding','Fertilizing','Pest Control','Irrigation','Harvesting Equipment','Other'];

@@ -9,16 +9,20 @@ Built with **React + Firebase (Auth + Firestore)**, deployed on **Netlify**.
 
 | Module | What it does |
 |---|---|
-| **Dashboard** | Consolidated KPIs, monthly revenue/expense chart for both segments |
-| **Tea Plantation** | Income & expense ledger with category breakdown. Integration hook ready for your existing app. |
-| **Properties** | Property portfolio with occupancy status |
-| **Tenants** | Full tenant directory, lease dates, expiry alerts |
-| **Rental Transactions** | Income & expense per property |
-| **Reports → P&L** | Monthly P&L table + chart, annual summary |
-| **Reports → Operating Statement** | Revenue & expense by category |
-| **Reports → By Segment** | Side-by-side Tea vs Rentals monthly breakdown |
-| **YOY Comparison** | 3-year revenue, expense, net trend — charts + table |
-| **Admin → Users** | Invite users, assign Admin/Viewer roles (max 10 users) |
+| **Overview → Dashboard** | Consolidated KPIs and monthly income/expense chart across Tea, Rentals and Homes |
+| **Overview → Reports** | Consolidated P&L Statement, Operating Statement and By Segment view, by month and year |
+| **Overview → YOY** | Year-over-year revenue, expense and net comparison, charts + table |
+| **Tea Plantation** | Harvest log (bags, deductions, net kg), agent rates & payments, worker wages (per kg or daily wage), advances, settlements, maintenance, inventory, lease, weather, analytics and Tea YOY |
+| **Rental Homes** | Properties, tenants, lease alerts, rental income/expense ledger and Rental YOY |
+| **Homes & Expenses** | Home maintenance and expense ledger with Home YOY |
+| **Insights** | Rule-based flags, forecasts and AI recommendations (Netlify function) |
+| **User Management** | Invite users, assign Admin/Viewer roles (max 10 users) — admin only |
+
+### Worker pay
+
+Each harvest session pays its worker either **per kg** (net kg × ₹6) or a **daily wage** (days × daily rate).
+Set a worker's default under Tea → People; it can be changed per session on the harvest form.
+Sessions saved before this option existed are treated as per kg.
 
 ---
 

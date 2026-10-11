@@ -1,5 +1,5 @@
 import React,{useState,useEffect} from 'react';
-import {inr} from '../../utils/chaayaService';
+import {inr,WORKER_KG_RATE} from '../../utils/chaayaService';
 import {C} from './chaayaStyles';
 import ChModal from './ChModal';
 
@@ -42,6 +42,7 @@ export default function PeopleTab({isAdmin,workers,agents,fields,harvest,onEdit,
                     </div>
                   </div>
                   <EntityRow label="Phone" value={w.phone}/>
+                  <EntityRow label="Pay" value={w.payBasis==='daily'?(w.dailyRate?`Daily wage · ₹${Number(w.dailyRate).toLocaleString('en-IN')}/day`:'Daily wage'):`Per kg · ₹${WORKER_KG_RATE}/kg`}/>
                   <EntityRow label="Payment" value={w.payment}/>
                   <EntityRow label="Start Date" value={w.startDate}/>
                   <EntityRow label="End Date" value={w.endDate}/>
@@ -176,7 +177,19 @@ export function EntityModal({open,type,editing,onClose,onSave}){
                 <option value="active">Active</option><option value="inactive">Inactive</option>
               </select></div>
           </div>
-          <div className="ch-form-group"><label>Payment Terms</label><input className="ch-input" value={form.payment||''} onChange={e=>set('payment',e.target.value)} placeholder="e.g. Weekly, ₹6/kg"/></div>
+          {type==='worker'&&(
+            <div className="ch-grid-2">
+              <div className="ch-form-group"><label>Default pay</label>
+                <select className="ch-input" value={form.payBasis||'kg'} onChange={e=>set('payBasis',e.target.value)}>
+                  <option value="kg">Per kg (₹{WORKER_KG_RATE}/kg)</option><option value="daily">Daily wage</option>
+                </select></div>
+              {form.payBasis==='daily'&&(
+                <div className="ch-form-group"><label>Daily wage (₹)</label>
+                  <input className="ch-input" type="number" min="0" step="10" value={form.dailyRate||''} onChange={e=>set('dailyRate',parseFloat(e.target.value)||'')} placeholder="e.g. 500"/></div>
+              )}
+            </div>
+          )}
+          <div className="ch-form-group"><label>Payment Terms</label><input className="ch-input" value={form.payment||''} onChange={e=>set('payment',e.target.value)} placeholder="e.g. Paid weekly on Saturday"/></div>
           <div className="ch-grid-2">
             <div className="ch-form-group"><label>Start Date</label><input className="ch-input" type="date" value={form.startDate||''} onChange={e=>set('startDate',e.target.value)}/></div>
             <div className="ch-form-group"><label>End Date</label><input className="ch-input" type="date" value={form.endDate||''} onChange={e=>set('endDate',e.target.value)}/></div>

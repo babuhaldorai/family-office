@@ -5,6 +5,7 @@ import {
   workersChaayaService, agentsChaayaService, fieldsChaayaService,
   calcBagWaterPct, getRateForAgentDate, explicitPaymentStatus, lastKnownRate, consumeWorkerAdvance,
   periodBounds, getFilteredHarvest, weekLabel, todayStr,
+  calcWorkerPay, workerPayDefaults,
 } from '../utils/chaayaService';
 import { useAuth } from '../context/AuthContext';
 import {addDoc, collection, deleteDoc, doc, getDocs, serverTimestamp, updateDoc} from 'firebase/firestore';
@@ -159,6 +160,8 @@ Deleting it will allow transactions on this field again. Are you sure?`);
   const [deductMode, setDeductMode]   = useState('perbag');
   const [hDate, setHDate]             = useState(todayStr());
   const [hWorker, setHWorker]         = useState('');
+  // How this session's worker is paid: { basis: 'kg'|'daily', days, dayRate }
+  const [hPay, setHPay]               = useState({ basis: 'kg', days: 1, dayRate: '' });
   const [hField, setHField]           = useState('');
   const [hAgent, setHAgent]           = useState('');
   const [editingHarvestId, setEditingHarvestId] = useState(null);
@@ -202,7 +205,13 @@ Deleting it will allow transactions on this field again. Are you sure?`);
     return a;
   }, [fields]);
 
-  useEffect(() => { if (!hWorker && workerList[0]) setHWorker(workerList[0]); }, [workerList]); // eslint-disable-line
+  // Picking a worker in the form loads their default pay basis from their profile.
+  const payDefaultsFor = useCallback(
+    (name) => workerPayDefaults(workers.find(w => w.name === name)),
+    [workers]
+  );
+  const selectWorker = (name) => { setHWorker(name); setHPay(payDefaultsFor(name)); };
+  useEffect(() => { if (!hWorker && workerList[0]) selectWorker(workerList[0]); }, [workerList]); // eslint-disable-line
   useEffect(() => { if (!hAgent  && agentList[0])  setHAgent(agentList[0]);  }, [agentList]);  // eslint-disable-line
   useEffect(() => { if (!hField  && fieldList[0])  setHField(fieldList[0]);  }, [fieldList]);  // eslint-disable-line
 
@@ -220,6 +229,11 @@ Deleting it will allow transactions on this field again. Are you sure?`);
     if (!bags.length)   return alert('❌ Add at least one bag.');
     const totalGross = bags.reduce((s,b)=>s+(b.gross||0),0);
     if (totalGross <= 0) return alert('❌ Total gross weight must be greater than 0.');
+    const isDaily = hPay.basis === 'daily';
+    const workDays = parseFloat(hPay.days);
+    const dayRate  = parseFloat(hPay.dayRate);
+    if (isDaily && !(workDays >= 0))  return alert('❌ Enter the number of days worked.');
+    if (isDaily && !(dayRate > 0))    return alert('❌ Enter the daily wage for this worker.');
     const rateRec = getRateForAgentDate(rates, hAgent, hDate);
     let rate, rateStatus;
     if (rateRec) {
@@ -240,7 +254,10 @@ Deleting it will allow transactions on this field again. Are you sure?`);
       date: hDate, worker: hWorker, field: hField, agent: hAgent,
       bags: bags.length, tGross, tBagDed, tWaterDed, tNet, avgWaterPct,
       bagDetails: bags.map(b => ({ ...b, waterPct: calcBagWaterPct(b) })),
-      workerPay: Math.round(tNet * 6), agentRev: parseFloat((tNet * rate).toFixed(1)), rate, rateStatus,
+      payBasis: isDaily ? 'daily' : 'kg',
+      workDays: isDaily ? workDays : null,
+      dayRate:  isDaily ? dayRate  : null,
+      workerPay: calcWorkerPay({ basis: hPay.basis, tNet, days: workDays, dayRate }), agentRev: parseFloat((tNet * rate).toFixed(1)), rate, rateStatus,
       weekStr: weekLabel(hDate), year: new Date(hDate).getFullYear(),
       month: new Date(hDate).getMonth() + 1,
     };
@@ -291,7 +308,7 @@ Deleting it will allow transactions on this field again. Are you sure?`);
     catch (e) { alert('Failed to delete: ' + e.message); }
   };
 
-  const clearForm = () => { setBags([]); setEditingHarvestId(null); setHDate(todayStr()); };
+  const clearForm = () => { setBags([]); setEditingHarvestId(null); setHDate(todayStr()); setHPay(payDefaultsFor(hWorker)); };
 
   // Inline rate edit from the Harvest Log table — recalculates agent revenue
   // and rate status automatically, without touching the rest of the entry.
@@ -374,6 +391,9 @@ Deleting it will allow transactions on this field again. Are you sure?`);
     setEditingHarvestId(entry.id);
     setHDate(entry.date || todayStr());
     setHWorker(entry.worker  || workerList[0]);
+    setHPay(entry.payBasis === 'daily'
+      ? { basis: 'daily', days: entry.workDays ?? 1, dayRate: String(entry.dayRate ?? '') }
+      : { basis: 'kg', days: 1, dayRate: '' });
     setHField(entry.field    || fieldList[0]);
     setHAgent(entry.agent    || agentList[0]);
     setBags(entry.bagDetails?.length
@@ -490,7 +510,8 @@ Deleting it will allow transactions on this field again. Are you sure?`);
             isAdmin={isAdmin} bags={bags} setBags={setBags}
             deductMode={deductMode} setDeductMode={setDeductMode}
             hDate={hDate} setHDate={setHDate}
-            hWorker={hWorker} setHWorker={setHWorker}
+            hWorker={hWorker} setHWorker={selectWorker}
+            hPay={hPay} setHPay={setHPay}
             hField={hField} setHField={setHField}
             hAgent={hAgent} setHAgent={setHAgent}
             workerList={workerList} agentList={agentList} fieldList={fieldList}

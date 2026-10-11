@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { inr, agentStats, periodLabel, getFieldAcres } from '../../utils/chaayaService';
 
-import PeriodBar from './PeriodBar';
+import PeriodBar from './TeaPeriodBar';
 
 // ── ANALYTICS TAB ─────────────────────────────────────────────────────────────
 export function AnalyticsTab({ anaH, anaPeriod, setAnaPeriod, fieldList, fields, maintenance, leases=[] }) {

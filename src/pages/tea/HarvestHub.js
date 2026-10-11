@@ -19,7 +19,7 @@ export default function HarvestHub({
   isAdmin, pendingRateSessions,
   // harvest tab props
   leasedFields, bags, setBags, deductMode, setDeductMode,
-  hDate, setHDate, hWorker, setHWorker, hField, setHField, hAgent, setHAgent,
+  hDate, setHDate, hWorker, setHWorker, hPay, setHPay, hField, setHField, hAgent, setHAgent,
   workerList, agentList, fieldList, rates, editingHarvestId,
   saveHarvest, savingHarvest, clearForm,
   filteredHarvest, harvestFilter, setHarvestFilter, harvestWeeks,
@@ -61,6 +61,7 @@ export default function HarvestHub({
           deductMode={deductMode} setDeductMode={setDeductMode}
           hDate={hDate} setHDate={setHDate}
           hWorker={hWorker} setHWorker={setHWorker}
+          hPay={hPay} setHPay={setHPay}
           hField={hField} setHField={setHField}
           hAgent={hAgent} setHAgent={setHAgent}
           workerList={workerList} agentList={agentList} fieldList={fieldList}

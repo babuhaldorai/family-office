@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { useMobile } from '../../hooks/useMobile';
 import { inr, kgFmt, periodLabel, getFieldAcres } from '../../utils/chaayaService';
 import { AGENT_COLORS } from './chaayaStyles';
-import PeriodBar from './PeriodBar';
+import PeriodBar from './TeaPeriodBar';
 
 export default function DashboardTab({ dashH, dashPeriod, setDashPeriod, allHarvest=[], fields, agentList, maintenance, leases=[], settlements=[], advances=[], pendingRateSessions }) {
   const isMobile = useMobile();

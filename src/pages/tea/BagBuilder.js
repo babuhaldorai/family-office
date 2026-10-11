@@ -1,9 +1,7 @@
 import React, { useRef, useEffect } from 'react';
-import {getRateForAgentDate,inr} from '../../utils/chaayaService';
+import {getRateForAgentDate,inr,calcWorkerPay} from '../../utils/chaayaService';
 
-const WORKER_RATE = 6;
-
-export default function BagBuilder({bags, onChange, agentName, dateStr, rates, rateOverride, onRateOverrideChange}) {
+export default function BagBuilder({bags, onChange, pay, agentName, dateStr, rates, rateOverride, onRateOverrideChange}) {
   const inputRefs = useRef([]);
   const lastAddedRef = useRef(null);
 
@@ -52,7 +50,7 @@ export default function BagBuilder({bags, onChange, agentName, dateStr, rates, r
   const lookedUpRate = rateRec ? rateRec.rate : 0;
   const hasOverride = rateOverride !== '' && rateOverride != null && !isNaN(parseFloat(rateOverride));
   const rate      = hasOverride ? parseFloat(rateOverride) : lookedUpRate;
-  const workerPay = Math.round(totalNet * WORKER_RATE);
+  const workerPay = calcWorkerPay({ basis: pay?.basis, tNet: totalNet, days: pay?.days, dayRate: pay?.dayRate });
   const agentRev  = parseFloat((totalNet * rate).toFixed(1));
 
   const setBagDed = (val) => {
@@ -190,7 +188,7 @@ export default function BagBuilder({bags, onChange, agentName, dateStr, rates, r
             <div className="ch-bag-footer">
               <span style={{fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)'}}>
                 {bags.length} bags · Net: <strong style={{color: 'var(--text)'}}>{totalNet.toFixed(2)} kg</strong>
-                {' · '}Worker: <strong style={{color: 'var(--success)'}}>{inr(workerPay)}</strong>
+                {' · '}Worker{pay?.basis === 'daily' ? ' (daily)' : ''}: <strong style={{color: 'var(--success)'}}>{inr(workerPay)}</strong>
                 {' · '}Agent rev: <strong style={{color: 'var(--success)'}}>₹{agentRev.toFixed(1)}</strong>
               </span>
             </div>
