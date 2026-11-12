@@ -5,7 +5,7 @@
 [build.environment]
   CI = "false"
   NODE_VERSION = "22"
-  SECRETS_SCAN_OMIT_PATHS = "build"
+  SECRETS_SCAN_OMIT_KEYS = "REACT_APP_FIREBASE_PROJECT_ID,REACT_APP_FIREBASE_AUTH_DOMAIN"
 
 [functions]
   directory = "netlify/staging-functions"
