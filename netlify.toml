@@ -1,10 +1,10 @@
 [build]
-  command = "npm run build"
+  command = "npm run build:staging"
   publish = "build"
 
 [build.environment]
   CI = "false"
-  NODE_VERSION = "18"
+  NODE_VERSION = "22"
 
 [functions]
-  directory = "netlify/functions"
+  directory = "netlify/staging-functions"
