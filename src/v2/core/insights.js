@@ -302,7 +302,9 @@ export function doBetter(books) {
     action: 'Ask for payment within a week of the last delivery.', value: null, tag: 'cash tied up', link: { tab: 'agents' },
   }));
 
-  return out.sort((x, y) => (y.value || 0) - (x.value || 0));
+  // these are rough estimates, so do not show them to the rupee
+  const rough = (v) => (v == null ? null : v >= 10000 ? Math.round(v / 1000) * 1000 : Math.round(v / 100) * 100);
+  return out.map((x) => ({ ...x, value: rough(x.value) || null })).sort((x, y) => (y.value || 0) - (x.value || 0));
 }
 
 // Spending compared with the same period a year earlier, largest growth first.

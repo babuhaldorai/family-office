@@ -15,8 +15,20 @@ service cloud.firestore {
     function isViewer() {
       return isSignedIn()
           && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'viewer'];
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'manager', 'viewer'];
     }
+
+    // ── New screens (collections named fo_*) ─────────────────────────────
+    // Roles: admin (Owner), manager, entry (Data entry), viewer.
+    function hasRole(roles) {
+      return isSignedIn()
+          && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in roles;
+    }
+    function canSeeMoney() { return hasRole(['admin', 'manager', 'viewer']); }
+    function canWrite()    { return hasRole(['admin', 'manager']); }
+    function canLog()      { return hasRole(['admin', 'manager', 'entry']); }
+    function anyRole()     { return hasRole(['admin', 'manager', 'entry', 'viewer']); }
 
     // Users
     match /users/{userId} {
@@ -60,6 +72,32 @@ service cloud.firestore {
     // Home Maintenance
     match /home_properties/{id} { allow read: if isViewer(); allow write: if isAdmin(); }
     match /home_expenses/{id}   { allow read: if isViewer(); allow write: if isAdmin(); }
+
+    // What Data entry needs in order to log a harvest or field work.
+    // Records are never destroyed from the screens (delete = recycle bin,
+    // which is an update); only the Owner can destroy from the bin.
+    match /fo_deliveries/{id} { allow read: if anyRole(); allow create, update: if canLog(); allow delete: if isAdmin(); }
+    match /fo_work/{id}       { allow read: if anyRole(); allow create, update: if canLog(); allow delete: if isAdmin(); }
+    match /fo_notes/{id}      { allow read: if anyRole(); allow create, update: if canLog(); allow delete: if isAdmin(); }
+    match /fo_rain/{id}       { allow read: if anyRole(); allow create, update: if canLog(); allow delete: if isAdmin(); }
+    match /fo_people/{id}     { allow read: if anyRole(); allow create, update: if canWrite(); allow delete: if isAdmin(); }
+    match /fo_fields/{id}     { allow read: if anyRole(); allow create, update: if canWrite(); allow delete: if isAdmin(); }
+    match /fo_stock/{id}      { allow read: if anyRole(); allow create, update: if canWrite(); allow delete: if isAdmin(); }
+    match /fo_settings/{id}   { allow read: if anyRole(); allow create, update: if canWrite(); allow delete: if isAdmin(); }
+
+    // Money: not readable by Data entry.
+    match /fo_entries/{id}    { allow read: if canSeeMoney(); allow create, update: if canWrite(); allow delete: if isAdmin(); }
+    match /fo_tenancies/{id}  { allow read: if canSeeMoney(); allow create, update: if canWrite(); allow delete: if isAdmin(); }
+    match /fo_properties/{id} { allow read: if canSeeMoney(); allow create, update: if canWrite(); allow delete: if isAdmin(); }
+    match /fo_equipment/{id}  { allow read: if canSeeMoney(); allow create, update: if canWrite(); allow delete: if isAdmin(); }
+    match /fo_leases/{id}     { allow read: if canSeeMoney(); allow create, update: if canWrite(); allow delete: if isAdmin(); }
+
+    // History of changes: written with every change, never altered or removed.
+    match /fo_history/{id} {
+      allow read:   if canSeeMoney();
+      allow create: if canLog();
+      allow update, delete: if false;
+    }
 
     // Deny everything else by default
     match /{document=**} {

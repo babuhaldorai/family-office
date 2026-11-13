@@ -57,7 +57,8 @@ export function sampleData(today = SAMPLE_TODAY) {
     const agentId = i % 3 === 2 ? 'a2' : 'a1';
     const yieldF = (fieldId === 'f1' ? 1.05 : 0.9) * season(d);
     const bagCount = 2 + (rnd() > 0.5 ? 1 : 0);
-    const bags = Array.from({ length: bagCount }, (_, k) => ({ kg: r2(Math.round((42 + rnd() * 14) * yieldF * 2) / 2), workerId: workers[(i + k) % 3] }));
+    const bags = [];
+    for (let k = 0; k < bagCount; k++) bags.push({ kg: r2(Math.round((42 + rnd() * 14) * yieldF * 2) / 2), workerId: workers[(i + k) % 3] });
     const gross = bags.reduce((s, b) => s + b.kg, 0);
     const waterPct = agentId === 'a2' ? 0.04 + rnd() * 0.02 : 0.025 + rnd() * 0.015;
     const week = Math.floor(daysBetween('2025-09-01', d) / 7);

@@ -10,6 +10,18 @@ import HomesPage from './pages/HomesPage';
 import InsightsPage from './pages/InsightsPage';
 import Sidebar from './components/layout/Sidebar';
 import './styles/global.css';
+import V2App from './v2/App2';
+import { createFirestoreStore } from './v2/data/firestoreStore';
+
+// The new screens. They read and write their own collections (fo_*); the old
+// pages below stay available under "the old app" for comparing figures.
+function NewApp({ user, role, onLogout, onClassic }) {
+  const store = React.useMemo(() => createFirestoreStore({
+    by: user.email || user.uid,
+    onError: (err) => window.dispatchEvent(new CustomEvent('v2-error', { detail: err })),
+  }), [user.email, user.uid]);
+  return <V2App store={store} user={user} role={role} onLogout={onLogout} onClassic={onClassic} />;
+}
 
 const BOTTOM_NAV = [
   { label: 'Overview', icon: LayoutDashboard, path: '/' },
@@ -20,7 +32,8 @@ const BOTTOM_NAV = [
 ];
 
 function AppShell() {
-  const { user, loading } = useAuth();
+  const { user, loading, role, logout } = useAuth();
+  const [classic, setClassic]     = useState(() => window.location.hash.startsWith('#/classic'));
   const [page, setPage]           = useState('/');
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -39,6 +52,11 @@ function AppShell() {
 
   if (!user) return <LoginPage />;
 
+  if (!classic) {
+    return <NewApp user={user} role={role} onLogout={logout}
+      onClassic={() => { window.location.hash = '#/classic'; setClassic(true); }} />;
+  }
+
   const navigate = (p) => { setPage(p); setMobileOpen(false); };
 
   const PageContent = () => {
@@ -55,6 +73,15 @@ function AppShell() {
 
   return (
     <div className="app-shell">
+      <button
+        onClick={() => { window.location.hash = '#/'; setClassic(false); }}
+        style={{
+          position: 'fixed', top: 10, right: 12, zIndex: 500, background: '#1F6B45', color: '#fff',
+          border: 0, borderRadius: 8, padding: '8px 14px', fontWeight: 600, cursor: 'pointer',
+        }}
+      >
+        Back to the new app
+      </button>
 
       {/* Mobile sidebar overlay */}
       {mobileOpen && (

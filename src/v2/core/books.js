@@ -592,7 +592,7 @@ export function buildBooks(raw, today) {
     if (t.end && daysBetween(today, t.end) >= 0 && daysBetween(today, t.end) <= 30) attention.push({ id: 'tend-' + t.id, type: 'property', propertyId: t.propertyId, title: `Rental agreement ending in ${daysBetween(today, t.end)} days`, sub: `${t.propertyName} · ${t.tenantName}`, tag: 'View', sort: 6 });
   });
   leases.forEach((l) => {
-    if (l.status === 'active' && l.daysLeft <= 30) attention.push({ id: 'lease-' + l.id, type: 'field', fieldId: l.fieldId, title: `Lease ending in ${l.daysLeft} days`, sub: `${l.fieldName}${l.toReturn > 0 ? ' · return deposit ' + l.toReturn.toLocaleString('en-IN') : ''}`, tag: 'View', sort: 5 });
+    if (l.status === 'active' && l.daysLeft <= 30) attention.push({ id: 'lease-' + l.id, type: 'field', fieldId: l.fieldId, title: `Lease ending in ${l.daysLeft} days`, sub: `${l.fieldName}${l.toReturn > 0 ? ' · return deposit ₹' + l.toReturn.toLocaleString('en-IN') : ''}`, tag: 'View', sort: 5 });
     if (l.status === 'ended' && l.toReturn > 0.5) attention.push({ id: 'ret-' + l.id, type: 'field', fieldId: l.fieldId, title: 'Lease deposit to return', sub: `${l.fieldName} · ${l.lessee || ''} · ended ${fmtDate(l.end)}`, amount: l.toReturn, sort: 5 });
   });
   const bills = [

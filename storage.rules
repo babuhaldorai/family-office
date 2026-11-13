@@ -1,0 +1,22 @@
+rules_version = '2';
+
+// Backups written by the app. Each backup is a new, dated file; nobody can
+// overwrite one, and only the Owner can read them back (to restore) or remove
+// old ones. The role is read from the users collection in Firestore.
+service firebase.storage {
+  match /b/{bucket}/o {
+    function role() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role;
+    }
+    match /backups/{file} {
+      allow create: if request.auth != null && role() in ['admin', 'manager']
+                    && request.resource.size < 50 * 1024 * 1024
+                    && request.resource.contentType == 'application/json';
+      allow read, delete: if request.auth != null && role() == 'admin';
+      allow update: if false;
+    }
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

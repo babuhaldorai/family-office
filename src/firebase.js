@@ -1,5 +1,7 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import {
+  getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+} from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 
 // ─────────────────────────────────────────────────────────────
@@ -17,6 +19,19 @@ const firebaseConfig = {
 };
 
 const app  = initializeApp(firebaseConfig);
-export const db   = getFirestore(app);
+
+// Keep a copy of the data on the device so entries can be made with no signal
+// and are sent when the connection returns. Falls back to the plain online
+// database where the browser does not allow local storage (private windows).
+let database;
+try {
+  database = initializeFirestore(app, {
+    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+  });
+} catch (e) {
+  database = getFirestore(app);
+}
+
+export const db   = database;
 export const auth = getAuth(app);
 export default app;
