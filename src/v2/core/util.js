@@ -131,3 +131,19 @@ export function csvCell(v) {
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 export const toCSV = (rows) => rows.map((r) => r.map(csvCell).join(',')).join('\n');
+
+// Pulls latitude and longitude out of what people paste: "11.41, 76.69", a
+// Google Maps address (…/@11.41,76.69,17z, ?q=11.41,76.69, !3d11.41!4d76.69).
+// Short share links (maps.app.goo.gl/…) carry no coordinates and return null.
+export function parseLatLon(text) {
+  const t = String(text || '').trim();
+  const pats = [/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/, /@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/, /[?&](?:q|ll|query|destination)=(-?\d+(?:\.\d+)?)(?:,|%2C)\s*(-?\d+(?:\.\d+)?)/i, /^\(?\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*\)?$/];
+  for (const re of pats) {
+    const m = t.match(re);
+    if (m) {
+      const lat = Number(m[1]), lon = Number(m[2]);
+      if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180 && !(lat === 0 && lon === 0)) return { lat, lon };
+    }
+  }
+  return null;
+}

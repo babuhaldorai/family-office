@@ -15,6 +15,16 @@ service firebase.storage {
       allow read, delete: if request.auth != null && role() == 'admin';
       allow update: if false;
     }
+    // Photos of harvest slips: added by anyone who may log a harvest, seen by
+    // anyone with access, never overwritten; only the Owner can remove them.
+    match /slips/{month}/{file} {
+      allow create: if request.auth != null && role() in ['admin', 'manager', 'entry']
+                    && request.resource.size < 3 * 1024 * 1024
+                    && request.resource.contentType == 'image/jpeg';
+      allow read: if request.auth != null && role() in ['admin', 'manager', 'entry', 'viewer'];
+      allow delete: if request.auth != null && role() == 'admin';
+      allow update: if false;
+    }
     match /{allPaths=**} {
       allow read, write: if false;
     }

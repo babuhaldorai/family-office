@@ -123,3 +123,48 @@
 .v2-x:hover { background: var(--grey-l); color: var(--red); }
 .v2-center { min-height: 100vh; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px; padding: 24px; text-align: center; }
 @media print { .v2-nav, .v2-side, .v2-banner, .v2-noprint { display: none !important; } .v2-main { padding: 0; } }
+
+/* The old app's stylesheet styles bare elements (td, th, label, input…) for a
+   dark theme. These keep it from leaking into the new screens. */
+.v2 table { font-size: 14px; }
+.v2 .v2-table td { color: var(--ink); background: transparent; }
+.v2 .v2-table tbody tr:hover td { background: transparent; }
+.v2 .v2-table tbody tr.tap:hover td { background: #F1F4EF; }
+.v2 .v2-table tbody tr:last-child td { border-bottom: 1px solid var(--line2); }
+.v2 .v2-table tr.tot td { border-bottom: 0; }
+.v2 .v2-table th { color: var(--muted); text-transform: none; letter-spacing: 0; font-size: 12px; padding: 8px; }
+.v2 thead tr { border-bottom: 0; }
+.v2 label { font-size: 15px; color: var(--ink); margin-bottom: 0; font-weight: 400; }
+.v2 label.v2-f > .v2-flab, .v2 .v2-flab { font-size: 13px; color: var(--muted); font-weight: 500; }
+.v2 input, .v2 select, .v2 textarea { font-family: inherit; font-size: 15px; transition: none; }
+.v2 .v2-inp { background: var(--card); border: 1px solid var(--input); border-radius: 8px; padding: 8px 12px; color: var(--ink); }
+.v2 .v2-inp.big { font-size: 20px; }
+.v2 .v2-inp:focus { border-color: var(--green); }
+.v2 select option { background: #fff; color: var(--ink); }
+.v2 input[type='checkbox'], .v2 input[type='radio'] { width: 20px; height: 20px; padding: 0; margin: 0; border: initial; background: initial; border-radius: initial; flex: none; accent-color: var(--green); -webkit-appearance: auto; appearance: auto; }
+.v2 input[type='file'] { padding: 8px; }
+.v2 textarea.v2-inp { min-height: 72px; }
+.v2 .v2-chip { padding: 0 14px; }
+.v2 .v2-chip.sm { padding: 0 12px; }
+.v2 .v2-btn { padding: 0 18px; }
+.v2 .v2-btn.sm { padding: 0 12px; }
+.v2 .v2-tabs button { padding: 0 14px; }
+.v2 .v2-tag { padding: 3px 8px; }
+.v2 .v2-card { padding: 14px; }
+.v2 .v2-card.hi { padding: 13px; }
+.v2 .v2-page { padding: 0 16px 24px; }
+.v2 .v2-top { padding: 16px 0 10px; }
+.v2 .v2-row.tap { padding: 6px 0; }
+.v2 .v2-opt { padding: 12px; }
+.v2 .v2-opt.on { padding: 11px; }
+.v2 .v2-month { padding: 8px; }
+.v2 .v2-empty { padding: 24px 12px; }
+.v2 .v2-toast { padding: 12px 18px; }
+.v2 .v2-banner { padding: 8px 16px; }
+.v2 .v2-center { padding: 24px; }
+@media (min-width: 900px) {
+  .v2 .v2-page { padding: 0 28px 32px; }
+  .v2 .v2-side { padding: 20px 12px; }
+  .v2 .v2-side a { padding: 0 12px; }
+}
+.v2 ::-webkit-scrollbar-track { background: transparent; }

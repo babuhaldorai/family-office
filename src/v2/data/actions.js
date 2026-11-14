@@ -41,6 +41,17 @@ export function deliveryOps(form, books) {
     const dayPaid = dayWork.some((w) => w.workerId === wid && form.dayOnly !== false);
     kgRates[wid] = dayPaid ? 0 : existing?.kgRates?.[wid] ?? kgRateFor(books.personById.get(wid));
   });
+  // optional: the slip's own deduction for each worker
+  let dedBy;
+  if (form.dedBy) {
+    const wids = [...new Set(bags.map((b) => b.workerId))];
+    dedBy = {};
+    wids.forEach((wid) => { dedBy[wid] = num(form.dedBy[wid]); });
+    const total = wids.reduce((s, wid) => s + dedBy[wid], 0);
+    if (Math.abs(total - (num(form.bagDed) + num(form.waterDed))) > 0.011) return { error: `The deductions per worker add up to ${r2(total)} kg but the total deduction is ${r2(num(form.bagDed) + num(form.waterDed))} kg.` };
+    const tooMuch = wids.find((wid) => dedBy[wid] > bags.filter((b) => b.workerId === wid).reduce((s, b) => s + b.kg, 0));
+    if (tooMuch) return { error: `${books.nameOf(tooMuch)}'s deduction is more than the weight they picked.` };
+  }
   const linkedSale = existing ? books.entries.find((e) => e.kind === 'tea_sale' && (e.deliveryIds || []).includes(id)) : null;
   const rateGiven = form.rate !== '' && form.rate != null && num(form.rate) > 0;
   const doc = {
@@ -50,6 +61,7 @@ export function deliveryOps(form, books) {
     rate: rateGiven ? num(form.rate) : null,
     rateBy: rateGiven && existing && existing.rate === num(form.rate) ? existing.rateBy || null : null,
     kgRates, dayWork, machine: !!form.machine, note: form.note || '',
+    dedBy, slipPath: form.slipPath || existing?.slipPath || undefined,
     createdAt: existing?.createdAt,
   };
   const ops = [set('deliveries', id, doc)];

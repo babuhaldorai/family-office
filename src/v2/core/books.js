@@ -66,6 +66,14 @@ export const isClosedDiff = (e) => e.expected != null && (isRounding(e) || (!!e.
 export const settledCash = (e) => (isClosedDiff(e) ? num(e.expected) : num(e.amount));
 export const entryDiff = (e) => (e.expected == null || isRounding(e) ? 0 : r2(num(e.amount) - num(e.expected)));
 
+// Which agent a field's leaf normally goes to on a given date. A field keeps a
+// dated list, so a change of agent does not rewrite earlier harvests.
+export function agentForField(field, date) {
+  const links = (field?.agentLinks || []).filter((l) => l.agentId && (!l.from || l.from <= date) && (!l.to || l.to >= date));
+  links.sort((x, y) => (y.from || '').localeCompare(x.from || ''));
+  return links.length ? links[0].agentId : '';
+}
+
 export const kgRateFor = (person) =>
   person && person.payBasis === 'day' ? 0 : num(person?.kgRate ?? DEFAULT_KG_RATE);
 
@@ -86,9 +94,15 @@ export function computeDelivery(d, personById = new Map()) {
   const ids = [...grossBy.keys()];
   const rows = new Map();
   let allocated = 0;
+  // Normally the one deduction is shared by weight picked. When the slip gives
+  // a deduction for each worker, those exact figures are used instead — but
+  // only if they cover every worker and add up to the total deduction.
+  const own = d.dedBy || null;
+  const useOwn = !!own && ids.length > 0 && ids.every((id) => own[id] != null)
+    && Math.abs(ids.reduce((s, id) => s + num(own[id]), 0) - ded) < TOL;
   ids.forEach((id, i) => {
     const g = grossBy.get(id);
-    const exact = gross > 0 ? (net * g) / gross : 0;
+    const exact = useOwn ? Math.max(0, g - num(own[id])) : gross > 0 ? (net * g) / gross : 0;
     // the last share takes the remainder, so the shares always add up to net
     const netKg = i === ids.length - 1 ? r2(net - allocated) : r2(exact);
     allocated = r2(allocated + netKg);
@@ -113,6 +127,7 @@ export function computeDelivery(d, personById = new Map()) {
     waterPct: gross > 0 ? r2((waterDed / gross) * 100) : 0,
     dedPct: gross > 0 ? r2((ded / gross) * 100) : 0,
     overDeducted: ded > gross + TOL,
+    dedByWorker: useOwn,
     workers,
     wages: sum(workers, (w) => w.wage),
     rate,

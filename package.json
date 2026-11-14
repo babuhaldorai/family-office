@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
     "date-fns": "^4.1.0",
     "firebase": "^12.12.0",
     "lucide-react": "^1.8.0",
@@ -13,7 +14,8 @@
     "recharts": "^3.8.1",
     "workbox-core": "^6.6.0",
     "workbox-precaching": "^6.6.0",
-    "workbox-routing": "^6.6.0"
+    "workbox-routing": "^6.6.0",
+    "zod": "^4.6.7"
   },
   "scripts": {
     "start": "react-scripts start",

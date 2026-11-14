@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useData, ROLES, ROLE_LABEL } from '../data/DataContext';
-import { Page, Card, Row, Tag, Field, Num, Text, Select, Btn, Check, Muted, Chips, Table, href, download, useForm } from '../ui/kit';
+import { Page, Card, Row, Tag, Field, Num, Text, Select, Btn, Check, Muted, Chips, Table, DateField, href, download, useForm } from '../ui/kit';
 import { COLLECTIONS } from '../core/books';
 import { makeBackup, validateBackup, planRestore, entriesCSV, deliveriesCSV } from '../core/backup';
 import { mapOldData } from '../core/migrate';
 import { usageOf } from '../data/actions';
 import { findPlace } from '../data/weather';
-import { inr, num, uid, fmtDate, addDays } from '../core/util';
+import { inr, num, uid, fmtDate, addDays, parseLatLon } from '../core/util';
 
 const SECTIONS = [
   ['lists', 'Fields, workers and agents', 'Names, pay rates, field size and location', 'write'],
@@ -124,9 +124,26 @@ function PersonForm({ kind, id, onDone }) {
 }
 
 function FieldForm({ id, onDone }) {
-  const { books, run } = useData();
+  const { books, today, run, say } = useData();
   const x = id ? books.fieldById.get(id) : null;
-  const [f, set] = useForm(() => x ? { ...x, acres: String(x.acres || '') } : { name: '', acres: '', place: '', lat: '', lon: '' });
+  const [f, set] = useForm(() => x ? { ...x, acres: String(x.acres || ''), agentLinks: x.agentLinks || [] } : { name: '', acres: '', place: '', lat: '', lon: '', agentLinks: [] });
+  const [paste, setPaste] = useState('');
+  const agents = books.people.filter((p) => p.kind === 'agent');
+  const setLink = (i, patch) => set('agentLinks', (l) => l.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const applyPaste = () => {
+    const pos = parseLatLon(paste);
+    if (!pos) return say(/goo\.gl|maps\.app/.test(paste) ? 'A short Google Maps link does not contain the position. In Google Maps, press and hold on the field, then copy the two numbers shown.' : 'Could not find a position in that. Paste the two numbers from Google Maps, like 11.4102, 76.6950.', true);
+    set('lat', pos.lat); set('lon', pos.lon); set('place', f.place && !/^Position /.test(f.place) ? f.place : `Position ${pos.lat.toFixed(4)}, ${pos.lon.toFixed(4)}`); setPaste('');
+    return say('Location set. Press Save.');
+  };
+  const here = () => {
+    if (!navigator.geolocation) return say('This device cannot give its position.', true);
+    return navigator.geolocation.getCurrentPosition(
+      (p) => { set('lat', Number(p.coords.latitude.toFixed(5))); set('lon', Number(p.coords.longitude.toFixed(5))); set('place', 'Set while standing at the field'); say('Location set. Press Save.'); },
+      () => say('The position was not allowed or not available. Paste it from Google Maps instead.', true),
+      { enableHighAccuracy: true, timeout: 15000 },
+    );
+  };
   const [q, setQ] = useState(x?.place || '');
   const [found, setFound] = useState(null);
   const used = x ? usageOf('fields', x.id, books) : 0;
@@ -136,7 +153,14 @@ function FieldForm({ id, onDone }) {
   };
   const save = () => {
     if (!f.name.trim()) return run({ error: 'Enter the name of the field.' });
-    const doc = { ...f, id: id || uid(), name: f.name.trim(), acres: num(f.acres) || '' };
+    // agents by date: newest first decides; an open-ended earlier line is closed the day before the next one starts
+    const links = f.agentLinks.filter((l) => l.agentId).map((l) => ({ agentId: l.agentId, from: l.from || '', to: l.to || '' })).sort((p, q) => (p.from || '').localeCompare(q.from || ''));
+    for (let i = 0; i < links.length; i++) {
+      if (links[i].to && links[i].from && links[i].to < links[i].from) return run({ error: 'An agent line ends before it starts.' });
+      if (i < links.length - 1 && !links[i].to && links[i + 1].from) links[i].to = addDays(links[i + 1].from, -1);
+      if (i < links.length - 1 && links[i].to && links[i + 1].from && links[i].to >= links[i + 1].from) return run({ error: 'Two agent lines cover the same dates. Change the dates so only one applies on any day.' });
+    }
+    const doc = { ...f, id: id || uid(), name: f.name.trim(), acres: num(f.acres) || '', agentLinks: links };
     if (run({ ops: [{ col: 'fields', id: doc.id, data: doc }] }, 'Saved')) onDone();
     return null;
   };
@@ -145,12 +169,29 @@ function FieldForm({ id, onDone }) {
       <Card title={x ? 'Change field' : 'Add a field'} hi>
         <div className="v2-cols"><Field label="Name"><Text value={f.name} onChange={(v) => set('name', v)} /></Field><Field label="Size in acres"><Num value={f.acres} onChange={(v) => set('acres', v)} /></Field></div>
       </Card>
+      <Card title="Usual agent for this field">
+        <Muted>Choosing this field on a harvest fills in the agent for that date. You can still pick a different agent on the day. When the agent changes, add a line with the date it starts; earlier harvests keep the old one.</Muted>
+        {f.agentLinks.map((l, i) => (
+          <div key={i} className="v2-cols" style={{ alignItems: 'flex-start' }}>
+            <Field label="Agent"><Select value={l.agentId} onChange={(v) => setLink(i, { agentId: v })} options={agents.map((a) => [a.id, a.name])} placeholder="Choose" /></Field>
+            <DateField label="From" value={l.from} onChange={(v) => setLink(i, { from: v })} />
+            <DateField label="Until (empty = still going)" value={l.to} onChange={(v) => setLink(i, { to: v })} />
+            <button type="button" className="v2-x" style={{ flex: 'none', marginTop: 22 }} aria-label="Remove this agent line" onClick={() => set('agentLinks', (list) => list.filter((_, j) => j !== i))}>×</button>
+          </div>
+        ))}
+        <button type="button" className="v2-link" onClick={() => set('agentLinks', (list) => [...list, { agentId: '', from: list.length ? today : '', to: '' }])}>{f.agentLinks.length ? '+ The agent changed' : '+ Set the usual agent'}</button>
+      </Card>
       <Card title="Location, for automatic rain">
         <Muted>{f.lat !== '' && f.lat != null ? `Set to ${f.place || 'a location'} (${Number(f.lat).toFixed(2)}, ${Number(f.lon).toFixed(2)}).` : 'Not set. Search for the nearest village or town.'}</Muted>
         <div style={{ display: 'flex', gap: 8 }}><Text value={q} onChange={setQ} placeholder="Village or town" aria-label="Village or town" onKeyDown={(e) => { if (e.key === 'Enter') search(); }} /><Btn kind="sec" onClick={search}>Search</Btn></div>
         {found === '…' && <Muted>Searching…</Muted>}
         {Array.isArray(found) && found.length === 0 && <Muted>Nothing found. Try a bigger town nearby, or check the connection.</Muted>}
         {Array.isArray(found) && found.map((r, i) => <Row key={i} onClick={() => { set('place', r.label); set('lat', r.lat); set('lon', r.lon); setFound(null); }} left={r.label} right={<Tag kind="g">Use</Tag>} />)}
+        <div className="v2-flab" style={{ marginTop: 6 }}>Or the exact spot, from Google Maps</div>
+        <Muted>In Google Maps, press and hold on the field (right-click on a computer) and copy the two numbers shown, or copy the page address. No Google account or payment is involved.</Muted>
+        <div style={{ display: 'flex', gap: 8 }}><Text value={paste} onChange={setPaste} placeholder="11.4102, 76.6950 or a Google Maps address" aria-label="Position from Google Maps" onKeyDown={(e) => { if (e.key === 'Enter') applyPaste(); }} /><Btn kind="sec" onClick={applyPaste}>Use</Btn></div>
+        <Btn kind="sec" onClick={here}>I am at the field now: use this spot</Btn>
+        {f.lat !== '' && f.lat != null && <a href={`https://www.google.com/maps?q=${f.lat},${f.lon}`} target="_blank" rel="noreferrer">Check the saved spot on Google Maps</a>}
       </Card>
       <div className="v2-cols"><Btn onClick={save}>Save</Btn><Btn kind="sec" onClick={onDone}>Cancel</Btn></div>
       {x && (used > 0

@@ -1,6 +1,6 @@
-import { buildBooks, computeDelivery, workCost, settledCash } from './books';
+import { buildBooks, computeDelivery, workCost, settledCash, agentForField } from './books';
 import { sampleData, SAMPLE_TODAY } from './sample';
-import { todayIST, inr, fmtDate, addMonths, periodFor, sum, r2 } from './util';
+import { todayIST, inr, fmtDate, addMonths, periodFor, sum, r2, parseLatLon } from './util';
 import { doBetter, fieldPlan, leaseAdvice, forecastNextMonth, yearAhead, beforeAfter } from './insights';
 
 const ALL = { from: '0000-01-01', to: '9999-12-31' };
@@ -30,6 +30,33 @@ describe('one delivery', () => {
       const d = computeDelivery({ bags, bagDed: 1.7 + i * 0.1, waterDed: 2.3 }, people);
       expect(r2(sum(d.workers, (w) => w.netKg))).toBe(d.net);
     }
+  });
+
+  test('a slip with its own deduction per worker is followed exactly', () => {
+    // 13 Nov slip: 191 kg less 7 = 184 x 6 = 1,104 and 164 kg less 6 = 158 x 6 = 948
+    const col1 = [25, 28, 28, 22, 27, 32, 29].map((kg) => ({ kg, workerId: 'L' }));
+    const col2 = [24, 25, 23, 17, 26, 23, 26].map((kg) => ({ kg, workerId: 'S' }));
+    const d = computeDelivery({ bags: [...col1, ...col2], bagDed: 13, waterDed: 0, dedBy: { L: 7, S: 6 } }, people);
+    expect(d.gross).toBe(355);
+    expect(d.net).toBe(342);
+    expect(d.dedByWorker).toBe(true);
+    expect(d.workers.map((w) => [w.grossKg, w.netKg, w.wage])).toEqual([[191, 184, 1104], [164, 158, 948]]);
+    // per-worker figures that do not add up to the total are ignored, not half-applied
+    const bad = computeDelivery({ bags: [...col1, ...col2], bagDed: 13, waterDed: 0, dedBy: { L: 7, S: 2 } }, people);
+    expect(bad.dedByWorker).toBe(false);
+    expect(r2(sum(bad.workers, (w) => w.netKg))).toBe(342);
+    // uneven per-worker deductions give a different split from sharing by weight
+    const uneven = computeDelivery({ bags: [{ kg: 100, workerId: 'L' }, { kg: 100, workerId: 'S' }], bagDed: 10, waterDed: 0, dedBy: { L: 8, S: 2 } }, people);
+    expect(uneven.workers.map((w) => w.netKg)).toEqual([92, 98]);
+  });
+
+  test('the usual agent for a field follows its dated list', () => {
+    const f = { agentLinks: [{ agentId: 'a1', from: '2026-01-01', to: '2026-06-30' }, { agentId: 'a2', from: '2026-07-01' }] };
+    expect(agentForField(f, '2026-03-10')).toBe('a1');
+    expect(agentForField(f, '2026-06-30')).toBe('a1');
+    expect(agentForField(f, '2026-07-01')).toBe('a2');
+    expect(agentForField(f, '2025-12-31')).toBe('');
+    expect(agentForField({}, '2026-01-01')).toBe('');
   });
 
   test('rate turns into an amount due only once it is known', () => {
@@ -221,6 +248,18 @@ describe('the sample books', () => {
     const ba = beforeAfter(b, b.workById.get('k4'));
     expect(ba.before.kg).toBeGreaterThan(0);
     expect(ba.after.kg).toBeGreaterThan(0);
+  });
+});
+
+describe('field location', () => {
+  test('coordinates are read from what people paste from Google Maps', () => {
+    expect(parseLatLon('11.4102, 76.6950')).toEqual({ lat: 11.4102, lon: 76.695 });
+    expect(parseLatLon('https://www.google.com/maps/place/Coonoor/@11.3530,76.7959,14z/data=!3m1')).toEqual({ lat: 11.353, lon: 76.7959 });
+    expect(parseLatLon('https://www.google.com/maps/place/X/@11.30,76.70,17z/data=!4m5!3m4!8m2!3d11.3412!4d76.7821')).toEqual({ lat: 11.3412, lon: 76.7821 });
+    expect(parseLatLon('https://maps.google.com/?q=11.35,76.79')).toEqual({ lat: 11.35, lon: 76.79 });
+    expect(parseLatLon('https://maps.app.goo.gl/AbCdEf123')).toBeNull();
+    expect(parseLatLon('Coonoor')).toBeNull();
+    expect(parseLatLon('999, 999')).toBeNull();
   });
 });
 

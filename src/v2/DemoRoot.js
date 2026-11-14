@@ -1,6 +1,8 @@
 // The app running on made-up data held in memory. Used for local testing and
 // for trying the screens safely; it never touches Firebase.
 import React, { useMemo } from 'react';
+// loaded here too, so tests on sample data see the same old-app styles the real app loads
+import '../styles/global.css';
 import V2App from './App2';
 import { createMemoryStore } from './data/memoryStore';
 import { sampleData, SAMPLE_TODAY } from './core/sample';
