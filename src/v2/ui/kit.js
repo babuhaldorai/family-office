@@ -51,12 +51,19 @@ export const Card = ({ title, right, hi, children, style }) => (
     {children}
   </section>
 );
-export const Row = ({ left, sub, right, top, onClick, to }) => {
+export const DelBtn = ({ onClick, label = 'Delete' }) => (
+  <button type="button" className="v2-del" aria-label={label} title={label} onClick={(e) => { e.stopPropagation(); onClick(); }}>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6" /></svg>
+  </button>
+);
+export const Row = ({ left, sub, right, top, onClick, to, onDelete, deleteLabel }) => {
   const inner = (<><span style={{ minWidth: 0 }}>{left}{sub && <div className="v2-muted">{sub}</div>}</span><span className="v2-num" style={{ textAlign: 'right' }}>{right}</span></>);
   const cls = 'v2-row' + (top ? ' top' : '');
-  if (to) return <a className={cls + ' tap'} href={to}>{inner}</a>;
-  if (onClick) return <button type="button" className={cls + ' tap'} onClick={onClick}>{inner}</button>;
-  return <div className={cls}>{inner}</div>;
+  const main = to ? <a className={cls + ' tap'} href={to}>{inner}</a>
+    : onClick ? <button type="button" className={cls + ' tap'} onClick={onClick}>{inner}</button>
+      : <div className={cls}>{inner}</div>;
+  if (!onDelete) return main;
+  return <div className="v2-rowwrap">{main}<DelBtn onClick={onDelete} label={deleteLabel} /></div>;
 };
 export const Tag = ({ kind, children, to, onClick }) => {
   const cls = 'v2-tag' + (kind ? ' ' + kind : '');
@@ -136,20 +143,21 @@ export function PayHow({ value, onChange, handlers, verb = 'paid', withDate = tr
   );
 }
 
-export function Table({ head, rows, foot, onRow, empty = 'Nothing here yet.' }) {
+export function Table({ head, rows, foot, onRow, onDelete, empty = 'Nothing here yet.' }) {
   if (!rows.length) return <Empty>{empty}</Empty>;
   return (
     <div className="v2-tw">
       <table className="v2-table">
-        <thead><tr>{head.map((h, i) => <th key={i} className={h.r ? 'r' : ''}>{h.label ?? h}</th>)}</tr></thead>
+        <thead><tr>{head.map((h, i) => <th key={i} className={h.r ? 'r' : ''}>{h.label ?? h}</th>)}{onDelete && <th><span style={{ position: 'absolute', left: -9999 }}>Delete</span></th>}</tr></thead>
         <tbody>
           {rows.map((r, i) => (
             <tr key={r.key ?? i} className={onRow ? 'tap' : ''} onClick={onRow ? () => onRow(r) : undefined}
               tabIndex={onRow ? 0 : undefined} onKeyDown={onRow ? (e) => { if (e.key === 'Enter') onRow(r); } : undefined}>
               {r.cells.map((c, j) => <td key={j} className={head[j] && head[j].r ? 'r' : ''}>{c}</td>)}
+              {onDelete && <td style={{ padding: '2px 0', verticalAlign: 'middle' }}>{r.noDelete ? null : <DelBtn onClick={() => onDelete(r)} label={r.deleteLabel || 'Delete this row'} />}</td>}
             </tr>
           ))}
-          {foot && <tr className="tot">{foot.map((c, j) => <td key={j} className={head[j] && head[j].r ? 'r' : ''}>{c}</td>)}</tr>}
+          {foot && <tr className="tot">{foot.map((c, j) => <td key={j} className={head[j] && head[j].r ? 'r' : ''}>{c}</td>)}{onDelete && <td />}</tr>}
         </tbody>
       </table>
     </div>

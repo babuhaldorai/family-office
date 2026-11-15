@@ -50,6 +50,13 @@ describe('one delivery', () => {
     expect(uneven.workers.map((w) => w.netKg)).toEqual([92, 98]);
   });
 
+  test('a deduction can be for bags, water and something else', () => {
+    const d = computeDelivery({ bags: [{ kg: 100, workerId: 'L' }], bagDed: 2, waterDed: 3, otherDed: 1.5 }, people);
+    expect(d.ded).toBe(6.5);
+    expect(d.net).toBe(93.5);
+    expect(d.waterPct).toBe(3);
+  });
+
   test('the usual agent for a field follows its dated list', () => {
     const f = { agentLinks: [{ agentId: 'a1', from: '2026-01-01', to: '2026-06-30' }, { agentId: 'a2', from: '2026-07-01' }] };
     expect(agentForField(f, '2026-03-10')).toBe('a1');

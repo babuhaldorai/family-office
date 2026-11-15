@@ -86,7 +86,8 @@ export function computeDelivery(d, personById = new Map()) {
   const gross = sum(bags, (b) => b.kg);
   const bagDed = num(d.bagDed);
   const waterDed = num(d.waterDed);
-  const ded = r2(bagDed + waterDed);
+  const otherDed = num(d.otherDed);
+  const ded = r2(bagDed + waterDed + otherDed);
   const net = r2(Math.max(0, gross - ded));
 
   const grossBy = new Map();
@@ -123,7 +124,7 @@ export function computeDelivery(d, personById = new Map()) {
   const hasRate = d.rate !== null && d.rate !== undefined && d.rate !== '' && num(d.rate) > 0;
   const rate = hasRate ? num(d.rate) : null;
   return {
-    bags, gross, bagDed, waterDed, ded, net,
+    bags, gross, bagDed, waterDed, otherDed, ded, net,
     waterPct: gross > 0 ? r2((waterDed / gross) * 100) : 0,
     dedPct: gross > 0 ? r2((ded / gross) * 100) : 0,
     overDeducted: ded > gross + TOL,
@@ -578,6 +579,7 @@ export function buildBooks(raw, today) {
     const weighed = sum(ds, (d) => d.gross);
     const bagDed = sum(ds, (d) => d.bagDed);
     const waterDed = sum(ds, (d) => d.waterDed);
+    const otherDed = sum(ds, (d) => d.otherDed);
     const netAgent = sum(ds, (d) => d.net);
     const netWorkers = sum(ds, (d) => sum(d.workers, (w) => w.netKg));
     const rated = ds.filter((d) => d.value != null);
@@ -585,8 +587,8 @@ export function buildBooks(raw, today) {
     const pay = entriesBy((e) => e.kind === 'wages' && inRange(e.date, period));
     const earned = sum(ds, (d) => d.wages);
     return {
-      deliveries: ds, weighed, bagDed, waterDed, deducted: r2(bagDed + waterDed), netAgent, netWorkers,
-      kgOk: Math.abs(netAgent - netWorkers) < TOL && Math.abs(weighed - bagDed - waterDed - netAgent) < TOL,
+      deliveries: ds, weighed, bagDed, waterDed, otherDed, deducted: r2(bagDed + waterDed + otherDed), netAgent, netWorkers,
+      kgOk: Math.abs(netAgent - netWorkers) < TOL && Math.abs(weighed - bagDed - waterDed - otherDed - netAgent) < TOL,
       agentValue: sum(rated, (d) => d.value), unratedKg: sum(ds.filter((d) => d.value == null), (d) => d.net),
       sales, received: sum(sales, (e) => e.amount),
       earned, pay, paid: sum(pay, (e) => e.amount), advRecovered: sum(pay, (e) => num(e.advanceRecovered)),

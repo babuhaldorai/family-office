@@ -6,6 +6,7 @@ import { inr, inRange, sum, fmtDate, num, r2, daysBetween } from '../core/util';
 import { DIFF_LABEL } from '../core/books';
 import { deliveriesCSV } from '../core/backup';
 import { equipmentOps, removeWithPayments } from '../data/actions';
+import { useDelete } from '../data/useDelete';
 
 const STATUS = { paid: ['g', 'Agent paid'], part: ['', 'Part paid'], due: ['', 'Agent to pay'], norate: ['', 'Rate not known'] };
 const TABS = [['harvest', 'Harvest'], ['account', 'Tea account'], ['fields', 'Fields'], ['people', 'People'], ['equipment', 'Equipment']];
@@ -27,6 +28,7 @@ export default function Tea({ tab = 'harvest' }) {
 
 function HarvestLog() {
   const { books, today, can } = useData();
+  const del = useDelete();
   const ps = usePeriod(today, 'month');
   const [fieldId, setField] = useState('');
   const [agentId, setAgent] = useState('');
@@ -49,6 +51,7 @@ function HarvestLog() {
         <Table
           head={head} empty="No harvest in this period."
           onRow={can.harvest ? (r) => go('/harvest/' + r.key) : undefined}
+          onDelete={can.harvest ? (r) => del.delivery(r.key) : undefined}
           rows={rows.map((d) => ({
             key: d.id,
             cells: can.money ? [
@@ -78,7 +81,7 @@ function Account() {
       <div className="v2-two">
         <Card title="Kg" right={<Tag kind={t.kgOk ? 'g' : 'r'}>{t.kgOk ? 'Matches' : 'Does not match'}</Tag>}>
           <Row left="Weighed" right={`${t.weighed.toFixed(1)} kg`} />
-          <Row left={`Agent deducted (bags ${t.bagDed.toFixed(1)} + water ${t.waterDed.toFixed(1)})`} right={`−${t.deducted.toFixed(1)} kg`} />
+          <Row left={`Deducted (bags ${t.bagDed.toFixed(1)} + water ${t.waterDed.toFixed(1)}${t.otherDed ? ` + other ${t.otherDed.toFixed(1)}` : ''})`} right={`−${t.deducted.toFixed(1)} kg`} />
           <Row left={<strong>Net kg the agents pay for</strong>} right={<strong>{t.netAgent.toFixed(1)} kg</strong>} />
           <Row left={<strong>Net kg the workers are paid for</strong>} right={<strong>{t.netWorkers.toFixed(1)} kg</strong>} />
         </Card>
@@ -122,6 +125,7 @@ function Account() {
 
 function Fields() {
   const { books, today, can } = useData();
+  const del = useDelete();
   return (
     <>
       <div className="v2-two">
@@ -144,7 +148,7 @@ function Fields() {
         <Card title="Manure in stock" right={can.write && <a href={href('/stock')}>+ New purchase</a>}>
           {books.stock.length === 0 && <Muted>No manure purchases logged.</Muted>}
           {books.stock.map((s) => (
-            <Row key={s.id} top to={can.write ? href('/stock/' + s.id) : undefined} left={<><strong>{s.name}</strong> · bought {fmtDate(s.date)}</>}
+            <Row key={s.id} top to={can.write ? href('/stock/' + s.id) : undefined} onDelete={can.write ? () => del.bill('stock', s.id, `the purchase of ${s.name}`) : undefined} deleteLabel={`Delete the purchase of ${s.name}`} left={<><strong>{s.name}</strong> · bought {fmtDate(s.date)}</>}
               sub={`${s.bags} bags · ${inr(s.cost)}${num(s.transport) ? ` incl. ${inr(s.transport)} transport` : ''} · ${s.used} applied`}
               right={<Tag kind={s.left > 0 ? 'g' : 'n'}>{s.left} left</Tag>} />
           ))}

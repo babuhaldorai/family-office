@@ -108,9 +108,9 @@ export function entriesCSV(books, entries) {
 }
 
 export function deliveriesCSV(books, deliveries) {
-  const head = ['Date', 'Field', 'Agent', 'Bags', 'Weighed kg', 'Deducted for bags', 'Deducted for water', 'Net kg', 'Rate', 'From agent', 'Wages', 'Rain mm', 'Workers', 'Status'];
+  const head = ['Date', 'Field', 'Agent', 'Bags', 'Weighed kg', 'Deducted for bags', 'Deducted for water', 'Deducted for other', 'Net kg', 'Rate', 'From agent', 'Wages', 'Rain mm', 'Workers', 'Status'];
   const rows = deliveries.map((d) => [
-    fmtDate(d.date), d.fieldName, d.agentName, d.bags.length, d.gross, d.bagDed, d.waterDed, d.net,
+    fmtDate(d.date), d.fieldName, d.agentName, d.bags.length, d.gross, d.bagDed, d.waterDed, d.otherDed, d.net,
     d.rate ?? '', d.value ?? '', d.wages, d.rainMm ?? '',
     d.workers.map((w) => `${books.nameOf(w.workerId)} ${w.netKg}kg ${w.wage}`).join('; '), d.agentStatus,
   ]);

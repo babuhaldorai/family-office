@@ -6,6 +6,7 @@ import { inr, inRange, sum, fmtDate, fmtMonth, r2 } from '../core/util';
 import { MODE_LABEL, DIFF_LABEL } from '../core/books';
 import { doBetter, spendingGrowth, forecastNextMonth } from '../core/insights';
 import { entriesCSV } from '../core/backup';
+import { useDelete } from '../data/useDelete';
 
 const TABS = [['summary', 'Summary'], ['better', 'Do better'], ['fields', 'Fields'], ['agents', 'Agents'], ['workers', 'Workers'], ['rentals', 'Rentals'], ['entries', 'Every entry']];
 const BIZ = [['all', 'All'], ['tea', 'Tea'], ['rental', 'Rentals'], ['home', 'Homes']];
@@ -231,41 +232,58 @@ function RentalsTab({ period }) {
 
 function Entries({ period, query }) {
   const { books, can } = useData();
+  const del = useDelete();
   const wide = useWide();
   const [q, setQ] = useState('');
-  const [dir, setDir] = useState('all');
+  const [show, setShow] = useState('all');
   const [biz, setBiz] = useState('all');
   const [party, setParty] = useState(query.party || '');
   const [by, setBy] = useState(query.by || '');
   const [mode, setMode] = useState('');
   const cat = query.cat || '';
-  const parties = useMemo(() => [...new Set(books.entries.map((e) => e.party).filter(Boolean))].sort(), [books]);
-  const partyName = party && books.personById.get(party)?.name;
-  const list = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return books.entries.filter((e) => inRange(e.date, period)
-      && (dir === 'all' || (dir === 'diff' ? Math.abs(e.diff) > 0.005 : e.dir === dir))
-      && (biz === 'all' || e.business === biz)
-      && (!party || e.partyId === party || e.party === party)
-      && (!by || (e.by || 'Not recorded') === by) && (!mode || e.mode === mode) && (!cat || e.cat === cat)
-      && (!needle || `${e.party} ${e.forText} ${e.note || ''} ${e.diffComment || ''} ${e.amount} ${e.cat}`.toLowerCase().includes(needle))
-      && e.kind !== 'advance_recovery');
-  }, [books, period, q, dir, biz, party, by, mode, cat]);
-  const totalIn = sum(list.filter((e) => e.dir === 'in'), (e) => e.amount);
-  const totalOut = sum(list.filter((e) => e.dir === 'out'), (e) => e.amount);
+  const partyName = (party && books.personById.get(party)?.name) || party;
+  const parties = useMemo(() => [...new Set([...books.entries.map((e) => e.party), ...books.deliveries.map((d) => d.agentName)].filter(Boolean))].sort(), [books]);
+  const needle = q.trim().toLowerCase();
+
+  // payments
+  const money = useMemo(() => books.entries.filter((e) => inRange(e.date, period)
+    && e.kind !== 'advance_recovery'
+    && (show === 'all' || show === 'money' || (show === 'diff' ? Math.abs(e.diff) > 0.005 : e.dir === show))
+    && (biz === 'all' || e.business === biz)
+    && (!party || e.partyId === party || e.party === partyName)
+    && (!by || (e.by || 'Not recorded') === by) && (!mode || e.mode === mode) && (!cat || e.cat === cat)
+    && (!needle || `${e.party} ${e.forText} ${e.note || ''} ${e.diffComment || ''} ${e.amount} ${e.cat}`.toLowerCase().includes(needle))),
+  [books, period, show, biz, party, partyName, by, mode, cat, needle]);
+  // harvests are not money, but they are things you logged, so they are listed too
+  const harvests = useMemo(() => ((show !== 'all' && show !== 'harvest') || by || mode || cat || (biz !== 'all' && biz !== 'tea') ? [] : books.deliveries.filter((d) => inRange(d.date, period)
+    && (!party || d.agentId === party || d.agentName === partyName || d.workers.some((w) => w.workerId === party || books.nameOf(w.workerId) === partyName))
+    && (!needle || `harvest ${d.agentName} ${d.fieldName} ${d.workers.map((w) => books.nameOf(w.workerId)).join(' ')} ${d.net} ${d.note || ''}`.toLowerCase().includes(needle)))),
+  [books, period, show, biz, party, partyName, by, mode, cat, needle]);
+
+  const totalIn = sum(money.filter((e) => e.dir === 'in'), (e) => e.amount);
+  const totalOut = sum(money.filter((e) => e.dir === 'out'), (e) => e.amount);
   // running total, oldest first, starting from zero on the first day shown
-  const running = useMemo(() => { const m = new Map(); let t = 0; list.slice().reverse().forEach((e) => { t = r2(t + e.signed); m.set(e.id, t); }); return m; }, [list]);
-  const open = (id) => can.write && go('/pay', { entry: id });
+  const running = useMemo(() => { const m = new Map(); let t = 0; money.slice().reverse().forEach((e) => { t = r2(t + e.signed); m.set(e.id, t); }); return m; }, [money]);
+  const rows = useMemo(() => [
+    ...money.map((e) => ({ type: 'money', id: e.id, date: e.date, at: e.updatedAt || '', e })),
+    ...harvests.map((d) => ({ type: 'harvest', id: d.id, date: d.date, at: d.updatedAt || '', d })),
+  ].sort((a, b) => b.date.localeCompare(a.date) || String(b.at).localeCompare(String(a.at))), [money, harvests]);
+
   const diffTag = (e) => (Math.abs(e.diff) > 0.005 ? <Tag>{inr(Math.abs(e.diff))} {e.diff > 0 ? 'extra' : 'short'}{e.diffReason ? ' · ' + DIFF_LABEL[e.diffReason] : ''}</Tag> : null);
+  const harvestFor = (d) => `Harvest · ${d.fieldName} · ${d.net.toFixed(1)} kg`;
+  const harvestNote = (d) => `${can.money ? `Wages earned ${inr(d.wages)} · ` : ''}${d.value != null ? `agent to pay ${inr(d.value)}` : 'rate not known yet'}`;
+  const open = (r) => { if (r.type === 'harvest') { if (can.harvest) go('/harvest/' + r.id); } else if (can.write) go('/pay', { entry: r.id }); };
+  const remove = (r) => (r.type === 'harvest' ? del.delivery(r.id) : del.entry(r.id));
   const months = [];
-  list.forEach((e) => { const mk = e.date.slice(0, 7); if (!months.length || months[months.length - 1].mk !== mk) months.push({ mk, rows: [] }); months[months.length - 1].rows.push(e); });
+  rows.forEach((r) => { const mk = r.date.slice(0, 7); if (!months.length || months[months.length - 1].mk !== mk) months.push({ mk, rows: [] }); months[months.length - 1].rows.push(r); });
+  const count = `${money.length} ${money.length === 1 ? 'payment' : 'payments'}${harvests.length ? ` and ${harvests.length} ${harvests.length === 1 ? 'harvest' : 'harvests'}` : ''}`;
   return (
     <>
       <Text value={q} onChange={setQ} type="search" placeholder="Search a name, amount or comment" aria-label="Search" />
-      <Chips small label="Show" options={[['all', 'All'], ['in', 'Money in'], ['out', 'Money out'], ['diff', 'With a difference']]} value={dir} onChange={setDir} />
+      <Chips small label="Show" options={[['all', 'Everything'], ['money', 'Payments'], ['harvest', 'Harvests'], ['in', 'Money in'], ['out', 'Money out'], ['diff', 'With a difference']]} value={show} onChange={setShow} />
       <div className="v2-cols">
         <Select aria-label="Business" value={biz} onChange={setBiz} options={BIZ} />
-        <Select aria-label="With" value={partyName || party} onChange={setParty} options={parties} placeholder="Anyone" />
+        <Select aria-label="With" value={partyName} onChange={setParty} options={parties} placeholder="Anyone" />
         <Select aria-label="Handled by" value={by} onChange={setBy} options={[...books.handlers, 'Not recorded']} placeholder="Handled by anyone" />
         <Select aria-label="How" value={mode} onChange={setMode} options={Object.entries(MODE_LABEL)} placeholder="Any way" />
       </div>
@@ -277,29 +295,37 @@ function Entries({ period, query }) {
           <div><Muted>Net</Muted><div className="v2-big v2-num">{inr(totalIn - totalOut)}</div></div>
         </div>
         <div className="v2-row" style={{ minHeight: 0 }}>
-          <Muted>{list.length} {list.length === 1 ? 'entry' : 'entries'}.{can.write ? ' Tap one to open or edit it.' : ''}</Muted>
-          {list.length > 0 && <button type="button" className="v2-link" onClick={() => download(`entries-${period.from}-to-${period.to}.csv`, entriesCSV(books, list))}>Download for Excel</button>}
+          <Muted>{count}. Tap one to open it; the bin icon deletes it.</Muted>
+          {money.length > 0 && <button type="button" className="v2-link" onClick={() => download(`entries-${period.from}-to-${period.to}.csv`, entriesCSV(books, money))}>Download for Excel</button>}
         </div>
+        {harvests.length > 0 && <Muted>Harvests are listed so nothing you logged is missing, but they are not money: the totals above count payments only.</Muted>}
       </Card>
       {wide ? (
         <Card>
-          <Table head={['Date', 'With', 'For', { label: 'In', r: 1 }, { label: 'Out', r: 1 }, 'How', 'Handled by', 'Difference', 'Comment', { label: 'Running total', r: 1 }]} empty="No entries match."
-            onRow={can.write ? (r) => open(r.key) : undefined}
-            rows={list.map((e) => ({ key: e.id, cells: [fmtDate(e.date), e.party, e.forText, e.dir === 'in' ? inr(e.amount) : '', e.dir === 'out' ? inr(e.amount) : '', MODE_LABEL[e.mode] || '', e.by || '', diffTag(e), [e.diffComment, e.note].filter(Boolean).join(' · '), inr(running.get(e.id))] }))}
-            foot={['Total', `${list.length} entries`, '', inr(totalIn), inr(totalOut), '', '', '', '', inr(totalIn - totalOut)]} />
-          <Muted>The running total starts at zero on the first day shown. It is not a bank or cash balance.</Muted>
+          <Table head={['Date', 'With', 'For', { label: 'In', r: 1 }, { label: 'Out', r: 1 }, 'How', 'Handled by', 'Difference', 'Comment', { label: 'Running total', r: 1 }]} empty="Nothing matches."
+            onRow={open} onDelete={can.write || can.harvest ? remove : undefined}
+            rows={rows.map((r) => (r.type === 'harvest'
+              ? { key: 'h' + r.id, id: r.id, type: r.type, noDelete: !can.harvest, deleteLabel: 'Delete this harvest', cells: [fmtDate(r.date), r.d.agentName, harvestFor(r.d), '', '', '', '', <Tag kind="n">Harvest</Tag>, harvestNote(r.d), ''] }
+              : { key: r.id, id: r.id, type: r.type, noDelete: !can.write, deleteLabel: 'Delete this payment', cells: [fmtDate(r.date), r.e.party, r.e.forText, r.e.dir === 'in' ? inr(r.e.amount) : '', r.e.dir === 'out' ? inr(r.e.amount) : '', MODE_LABEL[r.e.mode] || '', r.e.by || '', diffTag(r.e), [r.e.diffComment, r.e.note].filter(Boolean).join(' · '), inr(running.get(r.id))] }))}
+            foot={['Total', count, '', inr(totalIn), inr(totalOut), '', '', '', '', inr(totalIn - totalOut)]} />
+          <Muted>The running total starts at zero on the first day shown and counts payments only. It is not a bank or cash balance.</Muted>
         </Card>
       ) : months.map((m) => (
         <Card key={m.mk} title={fmtMonth(m.mk)}>
-          {m.rows.map((e) => (
-            <Row key={e.id} top onClick={can.write ? () => open(e.id) : undefined}
-              left={<><strong>{e.party}</strong> · {e.forText}</>}
-              sub={<>{[fmtDate(e.date, { year: false }), MODE_LABEL[e.mode], e.by, e.diffComment || e.note].filter(Boolean).join(' · ')}{diffTag(e) && <div style={{ marginTop: 4 }}>{diffTag(e)}</div>}</>}
-              right={<span className={e.dir === 'in' ? 'v2-green' : ''} style={{ fontWeight: 600 }}>{inr(e.signed, { sign: true })}</span>} />
-          ))}
+          {m.rows.map((r) => (r.type === 'harvest' ? (
+            <Row key={'h' + r.id} top onClick={can.harvest ? () => open(r) : undefined} onDelete={can.harvest ? () => remove(r) : undefined} deleteLabel="Delete this harvest"
+              left={<><strong>{r.d.agentName}</strong> · {harvestFor(r.d)}</>}
+              sub={<>{fmtDate(r.date, { year: false })} · {harvestNote(r.d)}</>}
+              right={<Tag kind="n">Harvest</Tag>} />
+          ) : (
+            <Row key={r.id} top onClick={can.write ? () => open(r) : undefined} onDelete={can.write ? () => remove(r) : undefined} deleteLabel="Delete this payment"
+              left={<><strong>{r.e.party}</strong> · {r.e.forText}</>}
+              sub={<>{[fmtDate(r.date, { year: false }), MODE_LABEL[r.e.mode], r.e.by, r.e.diffComment || r.e.note].filter(Boolean).join(' · ')}{diffTag(r.e) && <div style={{ marginTop: 4 }}>{diffTag(r.e)}</div>}</>}
+              right={<span className={r.e.dir === 'in' ? 'v2-green' : ''} style={{ fontWeight: 600 }}>{inr(r.e.signed, { sign: true })}</span>} />
+          )))}
         </Card>
       ))}
-      {!wide && list.length === 0 && <Card><Muted>No entries match.</Muted></Card>}
+      {!wide && rows.length === 0 && <Card><Muted>Nothing matches.</Muted></Card>}
     </>
   );
 }

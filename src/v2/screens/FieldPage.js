@@ -5,6 +5,7 @@ import { usePeriod, PeriodPicker } from '../ui/Period';
 import { WORK_TYPES, workCost } from '../core/books';
 import { fieldPlan, yearAhead, leaseAdvice, beforeAfter, scheduleOf } from '../core/insights';
 import { workOps, stockOps, leaseOps, removeWithPayments } from '../data/actions';
+import { useDelete } from '../data/useDelete';
 import { rainForecast } from '../data/weather';
 import { inr, num, sum, fmtDate } from '../core/util';
 
@@ -80,6 +81,7 @@ function Plan({ field }) {
 
 function Work({ field, startAdding, editId }) {
   const { books, today, can } = useData();
+  const del = useDelete();
   const [editing, setEditing] = useState(editId || (startAdding ? 'new' : null));
   const list = books.work.filter((w) => w.fieldId === field.id).slice().reverse();
   const preset = WORK_TYPES.some(([k]) => k === startAdding) ? startAdding : null;
@@ -95,6 +97,7 @@ function Work({ field, startAdding, editId }) {
           return (
             <div key={w.id} className="v2-line" style={{ padding: '6px 0' }}>
               <Row top onClick={can.harvest ? () => setEditing(w.id) : undefined}
+                onDelete={can.harvest ? () => del.bill('work', w.id, `this ${w.typeLabel.toLowerCase()} of ${fmtDate(w.date)}`) : undefined} deleteLabel={`Delete ${w.typeLabel} of ${fmtDate(w.date)}`}
                 left={<><strong>{w.typeLabel}</strong> · {fmtDate(w.date)}{w.oneTime ? ' · one-time' : ''}</>}
                 sub={[w.bagsApplied ? `${w.bagsApplied} bags` : '', w.comment, w.due > 0.5 ? 'not paid yet' : ''].filter(Boolean).join(' · ')}
                 right={can.money ? <Money v={w.fieldCost} /> : null} />

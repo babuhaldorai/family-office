@@ -8,14 +8,27 @@ import { inr, num, sum, addDays, fmtDate, r2 } from '../core/util';
 
 // The form is laid out like the paper slip: one block per worker with their
 // bag weights and, right underneath, the deduction for that worker.
-const blankGroup = (workerId = '') => ({ workerId, bags: [''], ded: '' });
+const blankGroup = (workerId = '') => ({ workerId, bags: [''], dWater: '', dBags: '', dOther: '', dNote: '' });
+const str = (n) => (n ? String(r2(n)) : '');
+// kg deducted for one worker: water + bags + anything else
+const gDed = (g) => r2(num(g.dWater) + num(g.dBags) + num(g.dOther));
 
 function groupsFrom(existing) {
   const order = [];
   const by = new Map();
   existing.bags.forEach((b) => { if (!by.has(b.workerId)) { by.set(b.workerId, []); order.push(b.workerId); } by.get(b.workerId).push(String(b.kg)); });
   const own = existing.dedByWorker ? existing.dedBy : null;
-  return order.map((wid) => ({ workerId: wid, bags: by.get(wid), ded: own ? String(own[wid] ?? '') : order.length === 1 && existing.ded ? String(existing.ded) : '' }));
+  return order.map((wid) => {
+    const base = { workerId: wid, bags: by.get(wid), dWater: '', dBags: '', dOther: '', dNote: '' };
+    const det = existing.dedDetail && existing.dedDetail[wid];
+    if (det) return { ...base, dWater: str(det.water), dBags: str(det.bags), dOther: str(det.other), dNote: det.note || '' };
+    // one worker: the delivery's own split is that worker's split
+    if (order.length === 1) return { ...base, dWater: str(existing.waterDed), dBags: str(existing.bagDed), dOther: str(existing.otherDed), dNote: existing.dedNote || '' };
+    // saved before the split existed: only the worker's total is known, so
+    // water is taken in the delivery's own proportion and the rest shown as bags
+    if (own) { const water = existing.ded > 0 ? r2((num(own[wid]) * existing.waterDed) / existing.ded) : 0; return { ...base, dWater: str(water), dBags: str(num(own[wid]) - water) }; }
+    return base;
+  });
 }
 
 export default function Harvest({ id, query }) {
@@ -33,6 +46,7 @@ export default function Harvest({ id, query }) {
     groups: groupsFrom(existing),
     dedMode: existing.dedByWorker || existing.workers.filter((w) => w.grossKg > 0).length <= 1 ? 'worker' : 'whole',
     bagDed: existing.bagDed ? String(existing.bagDed) : '', waterDed: existing.waterDed ? String(existing.waterDed) : '',
+    otherDed: existing.otherDed ? String(existing.otherDed) : '', dedNote: existing.dedNote || '',
     rainMm: existing.rainMm != null ? String(existing.rainMm) : '', rainSource: 'entered',
     rate: existing.rate != null ? String(existing.rate) : '', dayWork: (existing.dayWork || []).map((w) => ({ ...w, days: String(w.days), dayRate: String(w.dayRate) })),
     machine: !!existing.machine, note: existing.note || '', slipPath: existing.slipPath || '',
@@ -40,7 +54,7 @@ export default function Harvest({ id, query }) {
   } : {
     date: query.date || today, fieldId: last?.fieldId || fields[0]?.id || '',
     agentId: agentForField(books.fieldById.get(last?.fieldId || fields[0]?.id), query.date || today) || last?.agentId || agents[0]?.id || '',
-    groups: [blankGroup(workers[0]?.id)], dedMode: lastPerWorker ? 'worker' : 'whole', bagDed: '', waterDed: '',
+    groups: [blankGroup(workers[0]?.id)], dedMode: lastPerWorker ? 'worker' : 'whole', bagDed: '', waterDed: '', otherDed: '', dedNote: '',
     rainMm: '', rainSource: '', rate: '', dayWork: [], machine: false, note: '', slipPath: '', extras: [],
   });
   const [more, setMore] = useState(!!(existing && (existing.rate != null || existing.note || existing.machine)));
@@ -78,19 +92,27 @@ export default function Harvest({ id, query }) {
   const shaped = useMemo(() => {
     const bags = f.groups.flatMap((g) => g.bags.filter((kg) => num(kg) > 0).map((kg) => ({ kg: num(kg), workerId: g.workerId })));
     const pickers = [...new Set(f.groups.filter((g) => g.bags.some((kg) => num(kg) > 0)).map((g) => g.workerId))];
-    if (f.dedMode === 'whole') return { bags, pickers, bagDed: num(f.bagDed), waterDed: num(f.waterDed), dedBy: null };
+    if (f.dedMode === 'whole') return { bags, pickers, bagDed: num(f.bagDed), waterDed: num(f.waterDed), otherDed: num(f.otherDed), dedNote: num(f.otherDed) > 0 ? f.dedNote : '', dedBy: null, dedDetail: null };
     const own = {};
-    f.groups.forEach((g) => { if (g.workerId) own[g.workerId] = r2((own[g.workerId] || 0) + num(g.ded)); });
-    const total = r2(f.groups.reduce((t, g) => t + num(g.ded), 0));
-    const water = Math.min(num(f.waterDed), total);
-    return { bags, pickers, bagDed: r2(total - water), waterDed: water, dedBy: pickers.length > 1 ? own : null };
-  }, [f.groups, f.dedMode, f.bagDed, f.waterDed]);
+    const detail = {};
+    const live = f.groups.filter((g) => g.workerId && g.bags.some((kg) => num(kg) > 0));
+    live.forEach((g) => {
+      own[g.workerId] = r2((own[g.workerId] || 0) + gDed(g));
+      const d = detail[g.workerId] || { water: 0, bags: 0, other: 0, note: '' };
+      detail[g.workerId] = { water: r2(d.water + num(g.dWater)), bags: r2(d.bags + num(g.dBags)), other: r2(d.other + num(g.dOther)), note: [d.note, num(g.dOther) > 0 ? g.dNote : ''].filter(Boolean).join('; ') };
+    });
+    const notes = live.filter((g) => num(g.dOther) > 0 && g.dNote).map((g) => `${books.nameOf(g.workerId)}: ${g.dNote}`).join('; ');
+    return {
+      bags, pickers, bagDed: r2(live.reduce((t, g) => t + num(g.dBags), 0)), waterDed: r2(live.reduce((t, g) => t + num(g.dWater), 0)),
+      otherDed: r2(live.reduce((t, g) => t + num(g.dOther), 0)), dedNote: notes, dedBy: pickers.length > 1 ? own : null, dedDetail: detail,
+    };
+  }, [f.groups, f.dedMode, f.bagDed, f.waterDed, f.otherDed, f.dedNote, books]);
 
   const preview = useMemo(() => {
     const dayWork = f.dayWork.filter((w) => w.workerId && num(w.days) > 0);
     const kgRates = {};
     shaped.pickers.forEach((wid) => { if (wid) kgRates[wid] = dayWork.some((w) => w.workerId === wid) ? 0 : existing?.kgRates?.[wid] ?? kgRateFor(books.personById.get(wid)); });
-    return computeDelivery({ bags: shaped.bags, bagDed: shaped.bagDed, waterDed: shaped.waterDed, dedBy: shaped.dedBy, rate: f.rate, kgRates, dayWork }, books.personById);
+    return computeDelivery({ bags: shaped.bags, bagDed: shaped.bagDed, waterDed: shaped.waterDed, otherDed: shaped.otherDed, dedBy: shaped.dedBy, rate: f.rate, kgRates, dayWork }, books.personById);
   }, [shaped, f.dayWork, f.rate, books, existing]);
   const wageOf = (wid) => preview.workers.find((w) => w.workerId === wid);
 
@@ -131,12 +153,14 @@ export default function Harvest({ id, query }) {
   const linked = existing ? books.entries.find((e) => e.kind === 'tea_sale' && (e.deliveryIds || []).includes(existing.id)) : null;
   const perWorker = f.dedMode === 'worker';
   // a worker block with bags but no deduction typed, in per-worker mode: easy to forget
-  const missingDed = perWorker && f.groups.filter((g) => g.bags.some((kg) => num(kg) > 0) && g.ded === '');
+  const missingDed = perWorker && f.groups.filter((g) => g.bags.some((kg) => num(kg) > 0) && g.dWater === '' && g.dBags === '' && g.dOther === '');
 
   const save = () => {
     if (f.groups.some((g) => g.bags.some((kg) => num(kg) > 0) && !g.workerId)) { say('Choose who picked each set of bags.', true); return; }
     if (missingDed && missingDed.length && !window.confirm(`No deduction is entered for ${missingDed.map((g) => books.nameOf(g.workerId) || 'a worker').join(' and ')}.\n\nSave with no deduction?`)) return;
-    const res = deliveryOps({ ...f, bags: shaped.bags, bagDed: shaped.bagDed, waterDed: shaped.waterDed, dedBy: shaped.dedBy }, books);
+    const noNote = perWorker ? f.groups.find((g) => num(g.dOther) > 0 && !g.dNote.trim()) : (num(f.otherDed) > 0 && !f.dedNote.trim());
+    if (noNote) { say('Say what the "other" deduction was for.', true); return; }
+    const res = deliveryOps({ ...f, bags: shaped.bags, bagDed: shaped.bagDed, waterDed: shaped.waterDed, otherDed: shaped.otherDed, dedNote: shaped.dedNote, dedBy: shaped.dedBy, dedDetail: shaped.dedDetail }, books);
     if (res.warn && !window.confirm(res.warn + '\n\nSave anyway?')) return;
     if (run(res, existing ? 'Harvest updated' : 'Harvest saved')) { if (existing) back('/tea'); else go('/tea'); }
   };
@@ -166,7 +190,11 @@ export default function Harvest({ id, query }) {
 
       <div className="v2-flab">Deduction on this slip</div>
       <Chips label="How the deduction is written" options={[['worker', 'For each worker'], ['whole', 'One for the whole delivery']]} value={f.dedMode}
-        onChange={(v) => { set('dedMode', v); if (v === 'whole' && !f.bagDed) set('bagDed', String(r2(f.groups.reduce((t, g) => t + num(g.ded), 0) - num(f.waterDed)) || '')); }} />
+        onChange={(v) => {
+          // carry what is already typed across, so switching does not lose it
+          if (v === 'whole' && f.dedMode === 'worker') setAll((x) => ({ ...x, dedMode: v, bagDed: str(shaped.bagDed), waterDed: str(shaped.waterDed), otherDed: str(shaped.otherDed), dedNote: shaped.dedNote }));
+          else set('dedMode', v);
+        }} />
 
       {f.groups.map((g, gi) => {
         const weighed = r2(g.bags.reduce((t, kg) => t + num(kg), 0));
@@ -188,12 +216,17 @@ export default function Harvest({ id, query }) {
             </div>
             <Row left={`${count} ${count === 1 ? 'bag' : 'bags'} weighed`} right={<strong>{weighed.toFixed(1)} kg</strong>} />
             {perWorker && (
-              <div className="v2-row">
-                <label htmlFor={`ded-${gi}`}><strong>Deducted for this worker (kg)</strong><div className="v2-muted">Bags and water together, as on the slip</div></label>
-                <span style={{ width: 96, flex: 'none' }}><Num id={`ded-${gi}`} aria-label={`Worker ${gi + 1} deduction kg`} value={g.ded} onChange={(v) => setGroup(gi, { ded: v })} placeholder="0" /></span>
+              <div className="v2-stack" style={{ gap: 6, borderTop: '1px solid var(--line2)', paddingTop: 8 }}>
+                <strong>Deducted for this worker (kg)</strong>
+                <div className="v2-ded3">
+                  <Field label="Water"><Num aria-label={`Worker ${gi + 1} deducted for water`} value={g.dWater} onChange={(v) => setGroup(gi, { dWater: v })} placeholder="0" /></Field>
+                  <Field label="Bags"><Num aria-label={`Worker ${gi + 1} deducted for bags`} value={g.dBags} onChange={(v) => setGroup(gi, { dBags: v })} placeholder="0" /></Field>
+                  <Field label="Other"><Num aria-label={`Worker ${gi + 1} deducted for other`} value={g.dOther} onChange={(v) => setGroup(gi, { dOther: v })} placeholder="0" /></Field>
+                </div>
+                {num(g.dOther) > 0 && <Field label="What was the other deduction for?"><Text aria-label={`Worker ${gi + 1} other deduction comment`} value={g.dNote} onChange={(v) => setGroup(gi, { dNote: v })} placeholder="Stalks, coarse leaf, short weight…" /></Field>}
               </div>
             )}
-            {perWorker && <Row left={`${weighed.toFixed(1)} − ${num(g.ded).toFixed(1)}`} right={<span className="v2-big">{r2(Math.max(0, weighed - num(g.ded))).toFixed(1)} kg</span>} />}
+            {perWorker && <Row left={`${weighed.toFixed(1)} − ${gDed(g).toFixed(1)}`} right={<span className="v2-big">{r2(Math.max(0, weighed - gDed(g))).toFixed(1)} kg</span>} />}
             {can.money && w && firstOfWorker && count > 0 && (
               <Row left={`Wages${w.kgRate ? ` · ${w.netKg.toFixed(1)} kg × ₹${w.kgRate}` : ''}${w.dayWage ? ` · ${w.days} day` : ''}`} right={<strong>{inr(w.wage)}</strong>} />
             )}
@@ -205,16 +238,14 @@ export default function Harvest({ id, query }) {
       <Card title={perWorker ? 'Total for this delivery' : 'Agent deduction, once for the whole delivery'}>
         {!perWorker && (
           <div className="v2-cols">
-            <Field label="For bags (kg)"><Num value={f.bagDed} onChange={(v) => set('bagDed', v)} placeholder="0" /></Field>
             <Field label="For water (kg)"><Num value={f.waterDed} onChange={(v) => set('waterDed', v)} placeholder="0" /></Field>
+            <Field label="For bags (kg)"><Num value={f.bagDed} onChange={(v) => set('bagDed', v)} placeholder="0" /></Field>
+            <Field label="For other (kg)"><Num value={f.otherDed} onChange={(v) => set('otherDed', v)} placeholder="0" /></Field>
           </div>
         )}
+        {!perWorker && num(f.otherDed) > 0 && <Field label="What was the other deduction for?"><Text value={f.dedNote} onChange={(v) => set('dedNote', v)} placeholder="Stalks, coarse leaf, short weight…" /></Field>}
         <Row left={`${preview.gross.toFixed(1)} weighed − ${preview.ded.toFixed(1)} deducted`} right={<span className="v2-big">{preview.net.toFixed(1)} kg</span>} />
-        {perWorker && preview.ded > 0 && (
-          <Field label="Of the deduction, how much was for water? (kg, optional)" hint="Used to compare rain with water deduction. Leave empty if the slip does not say.">
-            <Num value={f.waterDed} onChange={(v) => set('waterDed', v)} placeholder="0" />
-          </Field>
-        )}
+        {preview.ded > 0 && <Muted>Deducted: water {preview.waterDed.toFixed(1)} + bags {preview.bagDed.toFixed(1)}{preview.otherDed ? ` + other ${preview.otherDed.toFixed(1)}` : ''} kg{shaped.dedNote ? ` (${shaped.dedNote})` : ''}</Muted>}
         {!perWorker && shaped.pickers.length > 1 && <Muted>The deduction is shared between the workers by the weight each picked.</Muted>}
         {preview.waterDed > 0 && <Muted>Water deduction is {preview.waterPct.toFixed(1)}% of the weight</Muted>}
         {preview.overDeducted && <div className="v2-tag r">The deduction is more than the weight of the bags.</div>}
@@ -271,7 +302,7 @@ export default function Harvest({ id, query }) {
       <Btn block onClick={save} disabled={!!lease}>{existing ? 'Save changes' : 'Save harvest'}</Btn>
       {existing && <Btn kind="danger" block onClick={remove}>Delete this harvest</Btn>}
       {existing && <Muted>{existing.updatedAt ? `Last changed ${fmtDate(String(existing.updatedAt).slice(0, 10))}${existing.updatedBy ? ' by ' + existing.updatedBy : ''}. ` : ''}Earlier versions are kept in Settings → History of changes.</Muted>}
-      {!existing && <button type="button" className="v2-link" onClick={() => { setAll((x) => ({ ...x, groups: [blankGroup(workers[0]?.id)], bagDed: '', waterDed: '' })); say('Cleared'); }}>Clear the bags</button>}
+      {!existing && <button type="button" className="v2-link" onClick={() => { setAll((x) => ({ ...x, groups: [blankGroup(workers[0]?.id)], bagDed: '', waterDed: '', otherDed: '', dedNote: '' })); say('Cleared'); }}>Clear the bags</button>}
     </Page>
   );
 }

@@ -14,11 +14,14 @@ const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log(
   const col1 = [25, 28, 28, 22, 27, 32, 29], col2 = [24, 25, 23, 17, 26, 23, 26];
   await page.getByRole('button', { name: 'For each worker' }).click();
   for (let i = 0; i < col1.length; i++) { await page.getByLabel(`Worker 1 bag ${i + 1} kg`).fill(String(col1[i])); if (i < col1.length - 1) await page.getByLabel(`Worker 1 bag ${i + 1} kg`).press('Enter'); }
-  await page.getByLabel('Worker 1 deduction kg').fill('7');
+  await page.getByLabel('Worker 1 deducted for water').fill('3');
+  await page.getByLabel('Worker 1 deducted for bags').fill('4');
   await page.getByRole('button', { name: '+ Add another worker' }).click();
   await page.getByLabel('Worker 2 name').selectOption({ label: 'Selvi' });
   for (let i = 0; i < col2.length; i++) { await page.getByLabel(`Worker 2 bag ${i + 1} kg`).fill(String(col2[i])); if (i < col2.length - 1) await page.getByLabel(`Worker 2 bag ${i + 1} kg`).press('Enter'); }
-  await page.getByLabel('Worker 2 deduction kg').fill('6');
+  await page.getByLabel('Worker 2 deducted for bags').fill('5');
+  await page.getByLabel('Worker 2 deducted for other').fill('1');
+  await page.getByLabel('Worker 2 other deduction comment').fill('Coarse leaf');
   let t = await text();
   assert(/355\.0 weighed − 13\.0 deducted/.test(t) && /342\.0 kg/.test(t), 'receipt: 355 weighed, 13 deducted, 342 net');
   assert(/191\.0 − 7\.0\s*184\.0 kg[\s\S]*?184\.0 kg × ₹6\s*₹1,104/.test(t), 'column 1: 191 - 7 = 184 kg x 6 = 1,104 as on the slip');
@@ -27,7 +30,17 @@ const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log(
   await page.locator('tr.tap, button.v2-row.tap').filter({ hasText: '355.0' }).first().click().catch(() => {});
   await page.waitForTimeout(300);
   t = await text();
-  assert(/Edit harvest/.test(await page.locator('.v2-h').innerText()) && await page.getByLabel('Worker 1 deduction kg').inputValue() === '7' && await page.getByLabel('Worker 2 deduction kg').inputValue() === '6', 'reopening the harvest shows 7 and 6 against each worker');
+  assert(/Edit harvest/.test(await page.locator('.v2-h').innerText()) && await page.getByLabel('Worker 1 deducted for water').inputValue() === '3' && await page.getByLabel('Worker 1 deducted for bags').inputValue() === '4' && await page.getByLabel('Worker 2 deducted for other').inputValue() === '1' && await page.getByLabel('Worker 2 other deduction comment').inputValue() === 'Coarse leaf', 'reopening the harvest shows water, bags, other and the comment for each worker');
+  await nav('/tea/account');
+  await page.getByRole('button', { name: 'This month' }).click();
+  await nav('/reports/entries');
+  t = await text();
+  assert(/Harvest · Upper field · 342\.0 kg/.test(t), 'the new harvest is listed under Every entry');
+  await page.getByLabel('Delete this harvest').first().click(); await page.waitForTimeout(300);
+  assert(!/Harvest · Upper field · 342\.0 kg/.test(await text()), 'the bin icon deletes it from the list');
+  await nav('/settings/bin');
+  assert(/harvest 2026-11-21 355 kg/.test(await text()), 'and it is in the recycle bin');
+  await page.getByRole('button', { name: 'Bring back' }).click(); await page.waitForTimeout(300);
   await nav('/settings/checks');
   assert(/All agree/.test(await text()), 'totals check passes with per-worker deductions');
 

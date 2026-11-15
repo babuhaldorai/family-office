@@ -28,7 +28,8 @@ export function deliveryOps(form, books) {
   if (!bags.length) return { error: 'Enter the weight of at least one bag.' };
   if (bags.some((b) => !b.workerId)) return { error: 'Choose who picked each bag.' };
   const gross = bags.reduce((s, b) => s + b.kg, 0);
-  if (num(form.bagDed) + num(form.waterDed) > gross) return { error: 'The deduction is more than the weight of the bags.' };
+  const dedTotal = num(form.bagDed) + num(form.waterDed) + num(form.otherDed);
+  if (dedTotal > gross) return { error: 'The deduction is more than the weight of the bags.' };
   const lease = books.activeLeaseOn(form.fieldId, form.date);
   if (lease) return { error: `${books.fieldName(form.fieldId)} is leased to ${lease.lessee || 'someone'} on that date, so no harvest can be logged on it.` };
 
@@ -48,7 +49,7 @@ export function deliveryOps(form, books) {
     dedBy = {};
     wids.forEach((wid) => { dedBy[wid] = num(form.dedBy[wid]); });
     const total = wids.reduce((s, wid) => s + dedBy[wid], 0);
-    if (Math.abs(total - (num(form.bagDed) + num(form.waterDed))) > 0.011) return { error: `The deductions per worker add up to ${r2(total)} kg but the total deduction is ${r2(num(form.bagDed) + num(form.waterDed))} kg.` };
+    if (Math.abs(total - dedTotal) > 0.011) return { error: `The deductions per worker add up to ${r2(total)} kg but the total deduction is ${r2(dedTotal)} kg.` };
     const tooMuch = wids.find((wid) => dedBy[wid] > bags.filter((b) => b.workerId === wid).reduce((s, b) => s + b.kg, 0));
     if (tooMuch) return { error: `${books.nameOf(tooMuch)}'s deduction is more than the weight they picked.` };
   }
@@ -56,7 +57,8 @@ export function deliveryOps(form, books) {
   const rateGiven = form.rate !== '' && form.rate != null && num(form.rate) > 0;
   const doc = {
     date: form.date, fieldId: form.fieldId, agentId: form.agentId, bags,
-    bagDed: num(form.bagDed), waterDed: num(form.waterDed),
+    bagDed: num(form.bagDed), waterDed: num(form.waterDed), otherDed: num(form.otherDed) || 0,
+    dedDetail: form.dedDetail || undefined, dedNote: form.dedNote || '',
     rainMm: form.rainMm === '' || form.rainMm == null ? null : num(form.rainMm),
     rate: rateGiven ? num(form.rate) : null,
     rateBy: rateGiven && existing && existing.rate === num(form.rate) ? existing.rateBy || null : null,
@@ -77,7 +79,7 @@ export function deliveryOps(form, books) {
     }));
   });
   books.entries.filter((e) => e.deliveryId === id && e.kind === 'misc' && !keep.has(e.id)).forEach((e) => ops.push(del('entries', e.id)));
-  const warn = linkedSale && existing && (Math.abs(existing.net - (gross - doc.bagDed - doc.waterDed)) > 0.005)
+  const warn = linkedSale && existing && (Math.abs(existing.net - (gross - doc.bagDed - doc.waterDed - doc.otherDed)) > 0.005)
     ? `This delivery is already in ${books.nameOf(linkedSale.partyId)}'s payment of ${linkedSale.date}. The kg changed, so that payment will now show a difference.` : null;
   return { ops, id, warn };
 }

@@ -40,7 +40,7 @@
   .v2-page { padding: 0 28px 32px; }
 }
 .v2-banner { background: var(--amber-l); color: var(--amber-d); padding: 8px 16px; font-size: 13px; font-weight: 500; text-align: center; }
-.v2-banner.red { background: var(--red-l); color: var(--red); }
+.v2-banner.red { background: #8E1F1F; color: #fff; }
 
 /* pieces */
 .v2-card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
@@ -61,7 +61,7 @@
 .v2-tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 6px; background: var(--amber-l); color: var(--amber-d); white-space: nowrap; text-decoration: none; border: 0; }
 .v2-tag.g { background: var(--green-l); color: var(--green-d); }
 .v2-tag.n { background: var(--grey-l); color: #3F4A44; }
-.v2-tag.r { background: var(--red-l); color: var(--red); }
+.v2-tag.r { background: #FBE3E1; color: #7A1616; border: 1px solid #E9B4AF; }
 .v2 .v2-btn { color: #fff; }
 .v2 .v2-btn.sec { color: var(--green); }
 .v2 .v2-btn.danger { color: var(--red); }
@@ -115,8 +115,9 @@
 .v2-colchart .pair i { display: block; width: 10px; border-radius: 3px 3px 0 0; min-height: 1px; }
 .v2-months { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
 .v2-month { border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; background: var(--card); }
-.v2-toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 88px; background: #1A211C; color: #fff; padding: 12px 18px; border-radius: 10px; z-index: 60; max-width: calc(100vw - 32px); font-weight: 500; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
-.v2-toast.err { background: var(--red); }
+.v2-toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 88px; background: #1A211C; color: #fff; padding: 14px 18px; border-radius: 10px; z-index: 600; width: max-content; max-width: calc(100vw - 32px); font: 500 15px/1.4 Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; box-shadow: 0 6px 24px rgba(0,0,0,.35); border: 0; text-align: left; cursor: pointer; }
+/* the toast sits outside .v2, so its colours are written out, not taken from the theme */
+.v2-toast.err { background: #8E1F1F; color: #fff; border: 2px solid #fff; font-weight: 600; }
 .v2-empty { text-align: center; color: var(--muted); padding: 24px 12px; }
 .v2-bagrow { display: grid; grid-template-columns: 52px 1fr 1.3fr 44px; gap: 8px; align-items: center; }
 .v2-x { width: 44px; height: 44px; border: 0; background: none; color: var(--muted); font-size: 22px; border-radius: 8px; }
@@ -159,7 +160,6 @@
 .v2 .v2-opt.on { padding: 11px; }
 .v2 .v2-month { padding: 8px; }
 .v2 .v2-empty { padding: 24px 12px; }
-.v2 .v2-toast { padding: 12px 18px; }
 .v2 .v2-banner { padding: 8px 16px; }
 .v2 .v2-center { padding: 24px; }
 @media (min-width: 900px) {
@@ -171,3 +171,11 @@
 
 .v2-bags { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; align-items: center; }
 .v2 .v2-bags .v2-inp { padding: 8px 6px; text-align: center; }
+
+.v2 a.v2-banner.red { color: #fff; }
+.v2-del { width: 40px; height: 40px; flex: none; border: 0; background: none; color: #7A1616; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.v2-del:hover { background: #FBE3E1; }
+.v2-rowwrap { display: flex; align-items: center; gap: 4px; border-top: 1px solid var(--line2); }
+.v2-rowwrap:first-child { border-top: 0; }
+.v2-rowwrap > .v2-row { flex: 1; min-width: 0; border-top: 0; }
+.v2-ded3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }

@@ -3,6 +3,7 @@ import { useData } from '../data/DataContext';
 import { Page, Card, Row, Tag, Money, Field, Num, Text, DateField, Btn, Muted, Check, href, useForm } from '../ui/kit';
 import { usePeriod, PeriodPicker } from '../ui/Period';
 import { removeWithPayments, usageOf } from '../data/actions';
+import { useDelete } from '../data/useDelete';
 import { inr, num, sum, fmtDate, fmtMonth, inRange, uid, daysBetween, periodFor } from '../core/util';
 
 const MONTH_TAG = { paid: ['g', 'Paid'], late: ['g', 'Paid late'], part: ['', 'Part paid'], due: ['', 'Not yet'], notyet: ['n', 'Not due'] };
@@ -44,6 +45,7 @@ export function Properties({ kind }) {
 
 export function Property({ id }) {
   const { books, today, can, run } = useData();
+  const del = useDelete();
   const p = books.propertyById.get(id);
   const ps = usePeriod(today, 'year');
   const [editing, setEditing] = useState(null);
@@ -107,7 +109,7 @@ export function Property({ id }) {
       <PeriodPicker state={ps} presets={['month', 'year', 'lastYear', 'all', 'custom']} />
       <Card title="Spent on this property" right={can.write && <a href={href('/pay', { type: 'other', kind: rental ? 'rental_expense' : 'home_expense', property: id })}>+ Add expense</a>}>
         {spending.length === 0 && <Muted>Nothing spent in this period.</Muted>}
-        {spending.map((e) => <Row key={e.id} top to={can.write ? href('/pay', { entry: e.id }) : undefined} left={<><strong>{e.category || e.cat}</strong> · {fmtDate(e.date)}</>} sub={[e.mode && e.mode.toUpperCase() === 'UPI' ? 'UPI' : e.mode ? e.mode[0].toUpperCase() + e.mode.slice(1) : '', e.by, e.note].filter(Boolean).join(' · ')} right={<Money v={e.amount} />} />)}
+        {spending.map((e) => <Row key={e.id} top to={can.write ? href('/pay', { entry: e.id }) : undefined} onDelete={can.write ? () => del.entry(e.id) : undefined} deleteLabel="Delete this expense" left={<><strong>{e.category || e.cat}</strong> · {fmtDate(e.date)}</>} sub={[e.mode && e.mode.toUpperCase() === 'UPI' ? 'UPI' : e.mode ? e.mode[0].toUpperCase() + e.mode.slice(1) : '', e.by, e.note].filter(Boolean).join(' · ')} right={<Money v={e.amount} />} />)}
         {spending.length > 0 && <Row left={<strong>Total</strong>} right={<strong><Money v={sum(spending, (e) => e.amount)} /></strong>} />}
       </Card>
       {byCat.size > 1 && (

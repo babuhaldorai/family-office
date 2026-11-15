@@ -28,7 +28,7 @@ export function DataProvider({ store, user, role, demo, fixedToday, children }) 
   const say = useCallback((text, err = false) => setToast({ text, err, k: Date.now() }), []);
   useEffect(() => {
     if (!toast) return undefined;
-    const t = setTimeout(() => setToast(null), toast.err ? 6000 : 3000);
+    const t = setTimeout(() => setToast(null), toast.err ? 9000 : 3000);
     return () => clearTimeout(t);
   }, [toast]);
   useEffect(() => {
@@ -60,7 +60,7 @@ export function DataProvider({ store, user, role, demo, fixedToday, children }) 
   return (
     <Ctx.Provider value={value}>
       {children}
-      {toast && <div key={toast.k} className={'v2-toast' + (toast.err ? ' err' : '')} role="status">{toast.text}</div>}
+      {toast && <button type="button" key={toast.k} className={'v2-toast' + (toast.err ? ' err' : '')} role={toast.err ? 'alert' : 'status'} onClick={() => setToast(null)}>{toast.text}</button>}
     </Ctx.Provider>
   );
 }
