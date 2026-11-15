@@ -179,3 +179,5 @@
 .v2-rowwrap:first-child { border-top: 0; }
 .v2-rowwrap > .v2-row { flex: 1; min-width: 0; border-top: 0; }
 .v2-ded3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+
+.v2-toast { bottom: 150px; }

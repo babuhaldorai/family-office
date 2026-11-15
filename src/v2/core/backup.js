@@ -13,7 +13,10 @@ export const BACKUP_VERSION = 2;
 const strip = (doc) => { const { _pending, ...rest } = doc; return rest; };
 // the record of the last backup must not itself count as a change
 // (nor the note of when the last reminder email went out)
-const isBackupMarker = (col, doc) => col === 'settings' && (doc.id === 'backup' || doc.id === 'reminderState');
+// nor the records the server jobs keep, nor who may use AI (which names this site's own users).
+// None of these is ever written back by a restore.
+const SERVER_DOCS = ['backup', 'reminderState', 'aiUsage', 'aiLatest', 'ai'];
+const isBackupMarker = (col, doc) => col === 'settings' && SERVER_DOCS.includes(doc.id);
 
 const sorted = (raw, { forFingerprint = false } = {}) => {
   const out = {};

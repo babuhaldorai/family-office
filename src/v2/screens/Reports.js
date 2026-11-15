@@ -8,6 +8,8 @@ import { doBetter, spendingGrowth, forecastNextMonth } from '../core/insights';
 import { entriesCSV } from '../core/backup';
 import { useDelete } from '../data/useDelete';
 import { nextHarvests, manureNeeds, pendingWork, summaryForAI } from '../core/planner';
+import { aiAccess, AI_DAILY_LIMIT } from '../core/ai';
+import { uid as newId } from '../core/util';
 
 const TABS = [['summary', 'Summary'], ['plan', 'Plan ahead'], ['better', 'Do better'], ['fields', 'Fields'], ['agents', 'Agents'], ['workers', 'Workers'], ['rentals', 'Rentals'], ['entries', 'Every entry']];
 const BIZ = [['all', 'All'], ['tea', 'Tea'], ['rental', 'Rentals'], ['home', 'Homes']];
@@ -139,6 +141,51 @@ function Summary({ period }) {
   );
 }
 
+// The AI summary. The server decides whether it may run; this only explains.
+function AiSummary() {
+  const { raw, user, today, demo, say } = useData();
+  const find = (id) => (raw.settings || []).find((x) => x.id === id) || null;
+  const access = aiAccess(find('ai'), find('aiUsage'), user?.uid, today);
+  const latest = find('aiLatest');
+  const [waiting, setWaiting] = useState(null); // { requestId, since }
+  const mine = waiting && latest && latest.requestId === waiting.requestId ? latest : null;
+  const finished = mine && mine.status !== 'working';
+  useEffect(() => { if (finished) setWaiting(null); }, [finished]);
+  useEffect(() => {
+    if (!waiting) return undefined;
+    const t = setTimeout(() => { setWaiting(null); say('The AI summary is taking longer than expected. It will appear here when it is ready; check the function log in Netlify if it never does.', true); }, 180000);
+    return () => clearTimeout(t);
+  }, [waiting, say]);
+  const ask = async () => {
+    if (demo) return say('AI summaries cannot be made from sample data.', true);
+    const requestId = newId();
+    setWaiting({ requestId });
+    try {
+      const { auth } = await import('../../firebase');
+      const res = await fetch('/.netlify/functions/ai-summary-background', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (await auth.currentUser.getIdToken()) }, body: JSON.stringify({ requestId }) });
+      if (res.status === 404) { setWaiting(null); say('The AI function is not on the site yet. In Netlify, check that Functions lists "ai-summary-background" and redeploy.', true); }
+    } catch (e) { setWaiting(null); say('Could not reach the site. Check the connection.', true); }
+    return null;
+  };
+  const shown = latest && latest.status === 'done' ? latest : null;
+  return (
+    <Card title="AI summary" right={access.ok ? <Tag kind="g">{access.left} of {AI_DAILY_LIMIT} left today</Tag> : null}>
+      {!access.ok && <Muted>{access.why}</Muted>}
+      {access.ok && <Btn disabled={!!waiting} onClick={ask}>{waiting ? 'Writing the summary… this can take a minute' : 'Write an AI summary of my business'}</Btn>}
+      {latest && latest.status === 'error' && (!waiting) && <div className="v2-tag r" style={{ whiteSpace: 'normal' }}>{latest.error}</div>}
+      {shown && (
+        <>
+          <Muted>Written {fmtDate(shown.date)} for {shown.by}{shown.cutOff ? '. It was cut short by the length limit.' : ''}</Muted>
+          <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>
+            {String(shown.text).split('\n').map((line, i) => (/^[A-Z][^-]*$/.test(line.trim()) && line.trim().length < 40 ? <strong key={i} style={{ display: 'block', marginTop: i ? 12 : 0 }}>{line.trim()}</strong> : <div key={i}>{line}</div>))}
+          </div>
+          <Muted>An AI wrote this from your figures. It can be wrong; check anything important against the entries before acting on it.</Muted>
+        </>
+      )}
+    </Card>
+  );
+}
+
 function Better() {
   const { books, say } = useData();
   const [area, setArea] = useState('all');
@@ -149,7 +196,8 @@ function Better() {
     <>
       <Chips small label="Area" options={BIZ.filter(([k]) => k !== 'home')} value={area} onChange={setArea} />
       <Muted>Worked out from your own entries, sorted by how much each could be worth in a year. The rupee figures are rough estimates.</Muted>
-      <Card title="A second opinion from an AI, free">
+      <AiSummary />
+      <Card title="Or take it to any AI yourself, free">
         <Muted>This copies a summary of your figures (fields, agents, costs, rentals, what the app flags) with a set of questions. Paste it into any AI assistant you already use. Names of workers, tenants and agents are left out. Nothing is sent anywhere by the app.</Muted>
         <Btn kind="sec" onClick={async () => { const text = summaryForAI(books); try { await navigator.clipboard.writeText(text); say('Copied. Paste it into an AI assistant.'); } catch (e) { download('summary-for-ai.txt', text, 'text/plain;charset=utf-8'); say('Saved as a file instead (copying was not allowed).'); } }}>Copy the summary and questions</Btn>
       </Card>

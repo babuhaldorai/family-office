@@ -83,7 +83,16 @@ service cloud.firestore {
     match /fo_people/{id}     { allow read: if anyRole(); allow create, update: if canWrite(); allow delete: if isAdmin(); }
     match /fo_fields/{id}     { allow read: if anyRole(); allow create, update: if canWrite(); allow delete: if isAdmin(); }
     match /fo_stock/{id}      { allow read: if anyRole(); allow create, update: if canWrite(); allow delete: if isAdmin(); }
-    match /fo_settings/{id}   { allow read: if anyRole(); allow create, update: if canWrite(); allow delete: if isAdmin(); }
+    // Settings. Three kinds of record are special:
+    //   ai                                  who may use AI summaries: Owner only
+    //   aiUsage, aiLatest, reminderState    written by the server jobs only, never from a browser
+    match /fo_settings/{id} {
+      allow read: if anyRole();
+      allow create, update: if canWrite()
+                            && !(id in ['aiUsage', 'aiLatest', 'reminderState'])
+                            && (id != 'ai' || isAdmin());
+      allow delete: if isAdmin() && !(id in ['aiUsage', 'aiLatest', 'reminderState']);
+    }
 
     // Money: not readable by Data entry.
     match /fo_entries/{id}    { allow read: if canSeeMoney(); allow create, update: if canWrite(); allow delete: if isAdmin(); }

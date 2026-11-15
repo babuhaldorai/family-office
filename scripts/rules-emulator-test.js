@@ -52,6 +52,15 @@ const fs = require('fs');
   await no(setDoc(doc(db('manager'), 'tea_harvest', 'old1'), { tNet: 2 }), 'manager: change the old app');
   await no(setDoc(doc(db('manager'), 'users', 'viewer'), { role: 'admin' }), 'manager: change someone\'s access');
   await no(updateDoc(doc(db('manager'), 'users', 'manager'), { role: 'admin' }), 'manager: make self an owner');
+  // AI settings: only the Owner decides; server-kept records cannot be written from a browser
+  await ok(setDoc(doc(db('admin'), 'fo_settings', 'ai'), { enabled: true, users: ['admin'] }), 'owner: switch AI on and choose users');
+  await no(setDoc(doc(db('manager'), 'fo_settings', 'ai'), { enabled: true, users: ['manager'] }), 'manager: give self AI access');
+  await ok(getDoc(doc(db('manager'), 'fo_settings', 'ai')), 'manager: see whether AI is on');
+  await no(setDoc(doc(db('manager'), 'fo_settings', 'aiUsage'), { count: 0 }), 'manager: reset the daily AI count');
+  await no(setDoc(doc(db('admin'), 'fo_settings', 'aiUsage'), { count: 0 }), 'owner: reset the daily AI count from a browser');
+  await no(setDoc(doc(db('admin'), 'fo_settings', 'aiLatest'), { text: 'x' }), 'owner: forge an AI summary');
+  await no(setDoc(doc(db('manager'), 'fo_settings', 'reminderState'), { sent: {} }), 'manager: alter the reminder record');
+  await ok(setDoc(doc(db('manager'), 'fo_settings', 'app'), { handlers: ['Me'] }), 'manager: ordinary settings');
   // history is append-only for everyone
   await ok(setDoc(doc(db('admin'), 'fo_history', 'h9'), { a: 1 }), 'owner: add history');
   await no(updateDoc(doc(db('admin'), 'fo_history', 'h1'), { at: 'y' }), 'owner: alter history');

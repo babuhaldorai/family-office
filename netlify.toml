@@ -1,14 +1,16 @@
+# One file for both Netlify sites (the test site and the real one). What differs
+# between them lives in each site's environment variables, not here.
 [build]
-  command = "npm run build:staging"
+  command = "npm run build:site"
   publish = "build"
 
 [build.environment]
   CI = "false"
   NODE_VERSION = "22"
-  SECRETS_SCAN_OMIT_KEYS = "REACT_APP_FIREBASE_PROJECT_ID,REACT_APP_FIREBASE_AUTH_DOMAIN"
+  SECRETS_SCAN_OMIT_KEYS = "REACT_APP_FIREBASE_PROJECT_ID,REACT_APP_FIREBASE_AUTH_DOMAIN,EXPECTED_FIREBASE_PROJECT"
 
 [functions]
-  directory = "netlify/staging-functions"
+  directory = "netlify/functions"
   # functions import shared code from src/ (written as ES modules)
   node_bundler = "esbuild"
 
@@ -19,19 +21,3 @@
 # 20:30 UTC = 2:00 am in India, every night; skipped when nothing changed
 [functions."scheduled-backup"]
   schedule = "30 20 * * *"
-
-# Sign-in on phones: the sign-in helper pages are served from this site's own
-# address (passed through to Firebase), so the browser does not treat them as a
-# third party and block their storage. Takes effect once
-# REACT_APP_FIREBASE_AUTH_DOMAIN is set to this site's address.
-[[redirects]]
-  from = "/__/auth/*"
-  to = "https://manage-my-tea.firebaseapp.com/__/auth/:splat"
-  status = 200
-  force = true
-
-[[redirects]]
-  from = "/__/firebase/*"
-  to = "https://manage-my-tea.firebaseapp.com/__/firebase/:splat"
-  status = 200
-  force = true

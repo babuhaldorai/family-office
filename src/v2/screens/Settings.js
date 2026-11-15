@@ -5,6 +5,7 @@ import { COLLECTIONS, agentConflicts } from '../core/books';
 import { makeBackup, validateBackup, planRestore, entriesCSV, deliveriesCSV } from '../core/backup';
 import { mapOldData } from '../core/migrate';
 import { reminderRecipients, blankRecipient } from '../core/reminders';
+import { AI_DAILY_LIMIT } from '../core/ai';
 import { usageOf } from '../data/actions';
 import { findPlace, rainHistory } from '../data/weather';
 import { inr, num, uid, fmtDate, addDays, parseLatLon } from '../core/util';
@@ -17,13 +18,14 @@ const SECTIONS = [
   ['history', 'History of changes', 'Who changed what, and the old value', 'money'],
   ['bin', 'Recycle bin', 'Deleted entries, kept for 90 days', 'write'],
   ['import', 'Bring in data from the old app', 'Copy the old records into the new screens', 'admin'],
+  ['ai', 'AI summaries', 'Switch on or off, and choose who can use them', 'admin'],
   ['reminders', 'Reminders', 'Emails about rent not logged, and Home reminders', 'write'],
 ];
 const NAMES = { people: 'person', fields: 'field', properties: 'property', tenancies: 'tenancy', deliveries: 'harvest', work: 'field work', stock: 'manure purchase', equipment: 'equipment', leases: 'lease', entries: 'payment', rain: 'rain record', notes: 'note', settings: 'setting' };
 
 export default function Settings({ section, onLogout, onClassic }) {
   const { can, user, role, meta, books, demo } = useData();
-  const Body = { lists: Lists, users: Users, backup: Backup, checks: Checks, history: History, bin: Bin, import: ImportOld, reminders: Reminders }[section];
+  const Body = { lists: Lists, users: Users, backup: Backup, checks: Checks, history: History, bin: Bin, import: ImportOld, reminders: Reminders, ai: AiSettings }[section];
   const allowed = (need) => can[need];
   if (Body) {
     const s = SECTIONS.find((x) => x[0] === section);
@@ -604,6 +606,40 @@ function Reminders() {
         <Check checked={s.remindHarvest !== false} onChange={(v) => save({ remindHarvest: v })}>Remind me when no harvest was entered for one of the last 3 days</Check>
         <Muted>Rent not received, agents who have not paid, wages due, unpaid bills and leases ending within 30 days always show under “Needs attention”.</Muted>
       </Card>
+    </>
+  );
+}
+
+// ── AI summaries (Owner only) ───────────────────────────────────────────────
+function AiSettings() {
+  const { raw, store, run, say, today, user } = useData();
+  const cfg = (raw.settings || []).find((x) => x.id === 'ai') || { enabled: false, users: [] };
+  const usage = (raw.settings || []).find((x) => x.id === 'aiUsage');
+  const used = usage && usage.date === today ? Number(usage.count) || 0 : 0;
+  const [people, setPeople] = useState(null);
+  useEffect(() => { store.listUsers().then((d) => setPeople(d.users)).catch((e) => { setPeople([]); say('Could not read the list of users: ' + (e.code || e.message), true); }); }, [store, say]);
+  const save = (patch, text) => run({ ops: [{ col: 'settings', id: 'ai', data: { id: 'ai', enabled: !!cfg.enabled, users: cfg.users || [], ...patch } }] }, text);
+  const toggle = (uid, on) => save({ users: on ? [...new Set([...(cfg.users || []), uid])] : (cfg.users || []).filter((x) => x !== uid) });
+  return (
+    <>
+      <Card title="AI summaries" right={<Tag kind={cfg.enabled ? 'g' : 'n'}>{cfg.enabled ? 'On' : 'Off'}</Tag>}>
+        <Check checked={!!cfg.enabled} onChange={(v) => save({ enabled: v, users: v && !(cfg.users || []).length && user?.uid ? [user.uid] : cfg.users || [] }, v ? 'AI summaries switched on' : 'AI summaries switched off for everyone')}>
+          <strong>Allow AI summaries</strong><div className="v2-muted">Off means nobody can use them, including you.</div>
+        </Check>
+        <Muted>A summary is written by an AI service from your figures, on Reports → Do better. At most {AI_DAILY_LIMIT} a day for everyone together; {used} used today. Names of workers, tenants and agents are not sent. Each summary costs roughly ₹3 to ₹10, charged to the AI account whose key is on the site.</Muted>
+      </Card>
+      {cfg.enabled && (
+        <Card title="Who can ask for a summary">
+          {!people && <Muted>Loading…</Muted>}
+          {people && people.filter((u) => u.role !== 'entry').map((u) => (
+            <Check key={u.id} checked={(cfg.users || []).includes(u.id)} onChange={(v) => toggle(u.id, v)}>
+              <strong>{u.displayName || u.email}</strong><div className="v2-muted">{u.email}{u.id === user?.uid ? ' · you' : ''}</div>
+            </Check>
+          ))}
+          {people && !(cfg.users || []).length && <div className="v2-tag" style={{ whiteSpace: 'normal' }}>Nobody is ticked, so nobody can use it yet.</div>}
+          <Muted>Only the Owner can change this page. People with Data entry access are not listed because they do not see money.</Muted>
+        </Card>
+      )}
     </>
   );
 }
