@@ -63,7 +63,7 @@ The old app stays available under Settings → "Open the old app" so you can com
 ## What is not built yet
 
 - **Email reminders.** Reminders appear on Home. Sending email needs a mail account and a scheduled server job.
-- **Reading a photo of a slip** is built but has not been run against the live service. It needs `ANTHROPIC_API_KEY` on the Netlify site and the updated `storage.rules` (for keeping the photo). If Netlify cuts the request off after 10 seconds, set `SLIP_MODEL` to a faster model.
+- **Reading numbers from a slip photo.** Removed because it would be a paid service. The harvest form keeps a photo of the slip for reference instead (needs the updated `storage.rules`).
 - **Restore directly from GitHub.** Backups go to GitHub; to restore from one, download the file from the
   repository and use "restore from a file". Restore from the bucket works in the app.
 - **Automatic WhatsApp or SMS.** Only the "Remind on WhatsApp" button on a rental (opens WhatsApp with the message written).

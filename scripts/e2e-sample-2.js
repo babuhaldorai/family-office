@@ -12,17 +12,22 @@ const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log(
   // the receipt of 13 Nov: two columns, each with its own deduction
   await nav('/harvest');
   const col1 = [25, 28, 28, 22, 27, 32, 29], col2 = [24, 25, 23, 17, 26, 23, 26];
-  let n = 1;
-  for (const kg of col1) { await page.getByLabel(`Bag ${n} weight in kg`).fill(String(kg)); await page.getByLabel(`Bag ${n} weight in kg`).press('Enter'); n++; }
-  for (const kg of col2) { await page.getByLabel(`Bag ${n} weight in kg`).fill(String(kg)); await page.getByLabel(`Bag ${n} picked by`).selectOption({ label: 'Selvi' }); if (n < 14) await page.getByLabel(`Bag ${n} weight in kg`).press('Enter'); n++; }
-  await page.getByRole('button', { name: 'The slip gives a deduction for each worker' }).click();
-  await page.getByLabel('Lakshmi', { exact: true }).fill('7');
-  await page.getByLabel('Selvi', { exact: true }).fill('6');
+  await page.getByRole('button', { name: 'For each worker' }).click();
+  for (let i = 0; i < col1.length; i++) { await page.getByLabel(`Worker 1 bag ${i + 1} kg`).fill(String(col1[i])); if (i < col1.length - 1) await page.getByLabel(`Worker 1 bag ${i + 1} kg`).press('Enter'); }
+  await page.getByLabel('Worker 1 deduction kg').fill('7');
+  await page.getByRole('button', { name: '+ Add another worker' }).click();
+  await page.getByLabel('Worker 2 name').selectOption({ label: 'Selvi' });
+  for (let i = 0; i < col2.length; i++) { await page.getByLabel(`Worker 2 bag ${i + 1} kg`).fill(String(col2[i])); if (i < col2.length - 1) await page.getByLabel(`Worker 2 bag ${i + 1} kg`).press('Enter'); }
+  await page.getByLabel('Worker 2 deduction kg').fill('6');
   let t = await text();
   assert(/355\.0 weighed − 13\.0 deducted/.test(t) && /342\.0 kg/.test(t), 'receipt: 355 weighed, 13 deducted, 342 net');
-  assert(/Lakshmi · 184\.0 kg × ₹6[\s\S]*?₹1,104/.test(t), 'column 1: 184 kg x 6 = 1,104 as on the slip');
-  assert(/Selvi · 158\.0 kg × ₹6[\s\S]*?₹948/.test(t), 'column 2: 158 kg x 6 = 948 as on the slip');
+  assert(/191\.0 − 7\.0\s*184\.0 kg[\s\S]*?184\.0 kg × ₹6\s*₹1,104/.test(t), 'column 1: 191 - 7 = 184 kg x 6 = 1,104 as on the slip');
+  assert(/164\.0 − 6\.0\s*158\.0 kg[\s\S]*?158\.0 kg × ₹6\s*₹948/.test(t), 'column 2: 164 - 6 = 158 kg x 6 = 948 as on the slip');
   await page.getByRole('button', { name: 'Save harvest' }).click(); await page.waitForTimeout(400);
+  await page.locator('tr.tap, button.v2-row.tap').filter({ hasText: '355.0' }).first().click().catch(() => {});
+  await page.waitForTimeout(300);
+  t = await text();
+  assert(/Edit harvest/.test(await page.locator('.v2-h').innerText()) && await page.getByLabel('Worker 1 deduction kg').inputValue() === '7' && await page.getByLabel('Worker 2 deduction kg').inputValue() === '6', 'reopening the harvest shows 7 and 6 against each worker');
   await nav('/settings/checks');
   assert(/All agree/.test(await text()), 'totals check passes with per-worker deductions');
 

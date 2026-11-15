@@ -318,9 +318,9 @@ function Backup() {
       <Card title="Automatic backup">
         <Row top left={<strong>Last backup</strong>} sub={marker ? `By ${marker.by || 'unknown'} · ${Math.round((marker.size || 0) / 1024)} KB` : 'None yet'} right={marker ? fmtDate(marker.date) : <Tag>Never</Tag>} />
         <Row left="Firebase storage bucket" right={status(marker?.bucket)} />
-        {marker && marker.bucket && marker.bucket !== 'ok' && <Muted>Bucket: {marker.bucket}</Muted>}
+        {marker && marker.bucket && marker.bucket !== 'ok' && <div className="v2-tag r" style={{ whiteSpace: 'normal' }}>Bucket: {marker.bucket}</div>}
         <Row left="Private GitHub repository" right={status(marker?.github)} />
-        {marker && marker.github && marker.github !== 'ok' && <Muted>GitHub: {marker.github}</Muted>}
+        {marker && marker.github && marker.github !== 'ok' && <div className="v2-tag r" style={{ whiteSpace: 'normal' }}>GitHub: {marker.github}</div>}
         <Muted>A backup is made automatically when an Owner or Manager opens the app and something has changed since the last one. On days with no change, nothing is saved.</Muted>
         <div className="v2-cols"><Btn onClick={backupNow} disabled={!!busy}>{busy || 'Back up now'}</Btn><Btn kind="sec" onClick={toDevice}>Download a copy to this device</Btn></div>
       </Card>

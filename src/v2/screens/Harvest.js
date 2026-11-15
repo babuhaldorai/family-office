@@ -4,7 +4,19 @@ import { Page, Card, Row, Tag, Field, Num, Text, Select, DateField, Btn, Check, 
 import { computeDelivery, kgRateFor, MODES, agentForField } from '../core/books';
 import { deliveryOps, removeDeliveryOps } from '../data/actions';
 import { rainRecord } from '../data/weather';
-import { inr, num, sum, addDays, fmtDate, r2, isDate } from '../core/util';
+import { inr, num, sum, addDays, fmtDate, r2 } from '../core/util';
+
+// The form is laid out like the paper slip: one block per worker with their
+// bag weights and, right underneath, the deduction for that worker.
+const blankGroup = (workerId = '') => ({ workerId, bags: [''], ded: '' });
+
+function groupsFrom(existing) {
+  const order = [];
+  const by = new Map();
+  existing.bags.forEach((b) => { if (!by.has(b.workerId)) { by.set(b.workerId, []); order.push(b.workerId); } by.get(b.workerId).push(String(b.kg)); });
+  const own = existing.dedByWorker ? existing.dedBy : null;
+  return order.map((wid) => ({ workerId: wid, bags: by.get(wid), ded: own ? String(own[wid] ?? '') : order.length === 1 && existing.ded ? String(existing.ded) : '' }));
+}
 
 export default function Harvest({ id, query }) {
   const { books, today, can, run, say, demo } = useData();
@@ -13,32 +25,34 @@ export default function Harvest({ id, query }) {
   const agents = books.people.filter((p) => p.kind === 'agent' && (p.active !== false || existing?.agentId === p.id));
   const fields = books.fields;
   const last = books.deliveries[books.deliveries.length - 1];
+  // new harvests start the way the last one was entered
+  const lastPerWorker = !last || last.dedByWorker || last.workers.filter((w) => w.grossKg > 0).length <= 1;
 
   const [f, set, setAll] = useForm(() => existing ? {
     id: existing.id, date: existing.date, fieldId: existing.fieldId, agentId: existing.agentId,
-    bags: existing.bags.map((b) => ({ kg: String(b.kg), workerId: b.workerId })),
+    groups: groupsFrom(existing),
+    dedMode: existing.dedByWorker || existing.workers.filter((w) => w.grossKg > 0).length <= 1 ? 'worker' : 'whole',
     bagDed: existing.bagDed ? String(existing.bagDed) : '', waterDed: existing.waterDed ? String(existing.waterDed) : '',
     rainMm: existing.rainMm != null ? String(existing.rainMm) : '', rainSource: 'entered',
     rate: existing.rate != null ? String(existing.rate) : '', dayWork: (existing.dayWork || []).map((w) => ({ ...w, days: String(w.days), dayRate: String(w.dayRate) })),
     machine: !!existing.machine, note: existing.note || '', slipPath: existing.slipPath || '',
-    dedBy: existing.dedByWorker ? Object.fromEntries(Object.entries(existing.dedBy).map(([k, v]) => [k, String(v)])) : null,
     extras: books.entries.filter((e) => e.deliveryId === existing.id && e.kind === 'misc').map((e) => ({ id: e.id, category: e.category, amount: String(e.amount), mode: e.mode, by: e.by })),
   } : {
     date: query.date || today, fieldId: last?.fieldId || fields[0]?.id || '',
-    agentId: agentForField(books.fieldById.get(last?.fieldId || fields[0]?.id), query.date || today) || last?.agentId || agents[0]?.id || '', dedBy: null, slipPath: '',
-    bags: [{ kg: '', workerId: workers[0]?.id || '' }], bagDed: '', waterDed: '', rainMm: '', rainSource: '',
-    rate: '', dayWork: [], machine: false, note: '', extras: [],
+    agentId: agentForField(books.fieldById.get(last?.fieldId || fields[0]?.id), query.date || today) || last?.agentId || agents[0]?.id || '',
+    groups: [blankGroup(workers[0]?.id)], dedMode: lastPerWorker ? 'worker' : 'whole', bagDed: '', waterDed: '',
+    rainMm: '', rainSource: '', rate: '', dayWork: [], machine: false, note: '', slipPath: '', extras: [],
   });
   const [more, setMore] = useState(!!(existing && (existing.rate != null || existing.note || existing.machine)));
   // the field's usual agent is filled in until the agent is chosen by hand
   const [agentTouched, setAgentTouched] = useState(!!existing);
   const usualAgent = agentForField(books.fieldById.get(f.fieldId), f.date);
   useEffect(() => { if (!agentTouched && usualAgent && usualAgent !== f.agentId) set('agentId', usualAgent); }, [usualAgent, agentTouched]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [slip, setSlip] = useState(null); // { busy } | { error } | { data, who: [] }
+  const [photoBusy, setPhotoBusy] = useState(false);
   const fileRef = useRef(null);
-  const refs = useRef([]);
-  const focusBag = useRef(null);
-  useEffect(() => { if (focusBag.current != null) { refs.current[focusBag.current]?.focus(); focusBag.current = null; } }, [f.bags.length]);
+  const refs = useRef({});
+  const focusNext = useRef(null);
+  useEffect(() => { if (focusNext.current) { refs.current[focusNext.current]?.focus(); focusNext.current = null; } });
 
   // rain: use what is already recorded for the day, else ask the weather record
   const field = books.fieldById.get(f.fieldId);
@@ -60,59 +74,53 @@ export default function Harvest({ id, query }) {
     return () => { dead = true; };
   }, [f.date, f.fieldId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── what the form means, in the shape the books use ──────────────────────
+  const shaped = useMemo(() => {
+    const bags = f.groups.flatMap((g) => g.bags.filter((kg) => num(kg) > 0).map((kg) => ({ kg: num(kg), workerId: g.workerId })));
+    const pickers = [...new Set(f.groups.filter((g) => g.bags.some((kg) => num(kg) > 0)).map((g) => g.workerId))];
+    if (f.dedMode === 'whole') return { bags, pickers, bagDed: num(f.bagDed), waterDed: num(f.waterDed), dedBy: null };
+    const own = {};
+    f.groups.forEach((g) => { if (g.workerId) own[g.workerId] = r2((own[g.workerId] || 0) + num(g.ded)); });
+    const total = r2(f.groups.reduce((t, g) => t + num(g.ded), 0));
+    const water = Math.min(num(f.waterDed), total);
+    return { bags, pickers, bagDed: r2(total - water), waterDed: water, dedBy: pickers.length > 1 ? own : null };
+  }, [f.groups, f.dedMode, f.bagDed, f.waterDed]);
+
   const preview = useMemo(() => {
     const dayWork = f.dayWork.filter((w) => w.workerId && num(w.days) > 0);
     const kgRates = {};
-    f.bags.forEach((b) => { if (b.workerId) kgRates[b.workerId] = dayWork.some((w) => w.workerId === b.workerId) ? 0 : existing?.kgRates?.[b.workerId] ?? kgRateFor(books.personById.get(b.workerId)); });
-    return computeDelivery({ ...f, kgRates, dayWork, dedBy: f.dedBy ? Object.fromEntries(Object.entries(f.dedBy).map(([k, v]) => [k, num(v)])) : null }, books.personById);
-  }, [f, books, existing]);
+    shaped.pickers.forEach((wid) => { if (wid) kgRates[wid] = dayWork.some((w) => w.workerId === wid) ? 0 : existing?.kgRates?.[wid] ?? kgRateFor(books.personById.get(wid)); });
+    return computeDelivery({ bags: shaped.bags, bagDed: shaped.bagDed, waterDed: shaped.waterDed, dedBy: shaped.dedBy, rate: f.rate, kgRates, dayWork }, books.personById);
+  }, [shaped, f.dayWork, f.rate, books, existing]);
+  const wageOf = (wid) => preview.workers.find((w) => w.workerId === wid);
 
-  const setBag = (i, k, v) => set('bags', (bags) => bags.map((b, j) => (j === i ? { ...b, [k]: v } : b)));
-  const addBag = () => { focusBag.current = f.bags.length; set('bags', (bags) => [...bags, { kg: '', workerId: bags[bags.length - 1]?.workerId || workers[0]?.id || '' }]); };
-  const onKey = (e, i) => { if (e.key === 'Enter') { e.preventDefault(); if (i < f.bags.length - 1) refs.current[i + 1]?.focus(); else addBag(); } };
-  const pickers = [...new Set(f.bags.map((b) => b.workerId).filter(Boolean))];
-  const setOwnDed = (wid, v) => {
-    const next = { ...(f.dedBy || {}), [wid]: v };
-    set('dedBy', next);
-    // the total follows the per-worker figures; water stays as typed
-    const total = pickers.reduce((t, w) => t + num(next[w]), 0);
-    set('bagDed', String(r2(Math.max(0, total - num(f.waterDed)))));
+  const setGroup = (gi, patch) => set('groups', (gs) => gs.map((g, j) => (j === gi ? { ...g, ...(typeof patch === 'function' ? patch(g) : patch) } : g)));
+  const setBag = (gi, bi, v) => setGroup(gi, (g) => ({ bags: g.bags.map((x, j) => (j === bi ? v : x)) }));
+  const addBag = (gi) => { focusNext.current = `${gi}-${f.groups[gi].bags.length}`; setGroup(gi, (g) => ({ bags: [...g.bags, ''] })); };
+  const onKey = (e, gi, bi) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    if (bi < f.groups[gi].bags.length - 1) refs.current[`${gi}-${bi + 1}`]?.focus(); else addBag(gi);
+  };
+  const addWorker = () => {
+    const used = new Set(f.groups.map((g) => g.workerId));
+    const next = workers.find((w) => !used.has(w.id));
+    focusNext.current = `${f.groups.length}-0`;
+    set('groups', (gs) => [...gs, blankGroup(next ? next.id : '')]);
   };
 
-  // ── photo of the slip ────────────────────────────────────────────────────
+  // ── photo of the slip, kept for reference only ───────────────────────────
   const onPhoto = async (file) => {
     if (!file) return;
-    setSlip({ busy: 'Reading the slip…' });
+    setPhotoBusy(true);
     try {
       const svc = await import('../data/slipService');
-      const blob = await svc.shrink(file);
-      const [data, path] = await Promise.all([
-        svc.readSlip(blob),
-        svc.keepPhoto(blob, f.date).catch(() => ''), // reading still works if the photo cannot be stored
-      ]);
-      if (path) set('slipPath', path);
-      if (!data || !data.readable || !data.columns.length) { setSlip({ error: 'The numbers on this photo could not be read. Try a sharper, straight-on photo, or type them in.' + (data?.notes ? ' ' + data.notes : '') }); return; }
-      // match a column heading to a worker's name where it is obvious, else leave it to be chosen
-      const who = data.columns.map((c, i) => workers.find((w) => c.heading && w.name.toLowerCase() === c.heading.trim().toLowerCase())?.id || (data.columns.length === 1 ? f.bags[0]?.workerId || '' : workers[i]?.id || ''));
-      setSlip({ data, who, kept: !!path });
-    } catch (e) { setSlip({ error: e.message || 'Reading the slip failed.' }); }
+      const path = await svc.keepPhoto(await svc.shrink(file), f.date);
+      set('slipPath', path);
+      say(existing ? 'Photo attached. Press Save changes to keep it.' : 'Photo attached');
+    } catch (e) { say('The photo could not be stored: ' + (e.code || e.message || 'unknown error'), true); }
+    setPhotoBusy(false);
     if (fileRef.current) fileRef.current.value = '';
-  };
-  const applySlip = () => {
-    const { data, who } = slip;
-    if (who.some((w) => !w)) { say('Choose who each column belongs to.', true); return; }
-    const bags = data.columns.flatMap((c, i) => c.weights.filter((kg) => kg > 0).map((kg) => ({ kg: String(kg), workerId: who[i] })));
-    const total = data.columns.reduce((t, c) => t + num(c.deduction), 0);
-    const perWorker = {};
-    data.columns.forEach((c, i) => { perWorker[who[i]] = r2((perWorker[who[i]] || 0) + num(c.deduction)); });
-    const distinct = new Set(who).size;
-    setAll((x) => ({
-      ...x, bags, bagDed: total ? String(r2(total)) : '', waterDed: '',
-      dedBy: distinct > 1 && total > 0 ? Object.fromEntries(Object.entries(perWorker).map(([k, v]) => [k, String(v)])) : null,
-      date: isDate(data.date) && data.date <= today ? data.date : x.date,
-    }));
-    setSlip(null);
-    say('Filled in from the slip. Check it, then save.');
   };
   const viewPhoto = async () => {
     try { const svc = await import('../data/slipService'); window.open(await svc.photoUrl(f.slipPath), '_blank', 'noopener'); }
@@ -121,9 +129,14 @@ export default function Harvest({ id, query }) {
 
   const lease = f.fieldId && f.date ? books.activeLeaseOn(f.fieldId, f.date) : null;
   const linked = existing ? books.entries.find((e) => e.kind === 'tea_sale' && (e.deliveryIds || []).includes(existing.id)) : null;
+  const perWorker = f.dedMode === 'worker';
+  // a worker block with bags but no deduction typed, in per-worker mode: easy to forget
+  const missingDed = perWorker && f.groups.filter((g) => g.bags.some((kg) => num(kg) > 0) && g.ded === '');
 
   const save = () => {
-    const res = deliveryOps({ ...f, dedBy: pickers.length > 1 && f.dedBy ? f.dedBy : null }, books);
+    if (f.groups.some((g) => g.bags.some((kg) => num(kg) > 0) && !g.workerId)) { say('Choose who picked each set of bags.', true); return; }
+    if (missingDed && missingDed.length && !window.confirm(`No deduction is entered for ${missingDed.map((g) => books.nameOf(g.workerId) || 'a worker').join(' and ')}.\n\nSave with no deduction?`)) return;
+    const res = deliveryOps({ ...f, bags: shaped.bags, bagDed: shaped.bagDed, waterDed: shaped.waterDed, dedBy: shaped.dedBy }, books);
     if (res.warn && !window.confirm(res.warn + '\n\nSave anyway?')) return;
     if (run(res, existing ? 'Harvest updated' : 'Harvest saved')) { if (existing) back('/tea'); else go('/tea'); }
   };
@@ -151,70 +164,65 @@ export default function Harvest({ id, query }) {
       </div>
       {lease && <div className="v2-tag r" style={{ whiteSpace: 'normal' }}>This field is leased to {lease.lessee || 'someone'} until {fmtDate(lease.end)}. A harvest cannot be logged on it for this date.</div>}
 
-      <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} aria-label="Photo of the slip" onChange={(e) => onPhoto(e.target.files[0])} />
-      <div className="v2-cols">
-        <Btn kind="sec" disabled={!!slip?.busy} onClick={() => (demo ? say('Reading a photo is not available on sample data.', true) : fileRef.current.click())}>{slip?.busy || (f.slipPath ? 'Take another photo of the slip' : 'Fill in from a photo of the slip')}</Btn>
-        {f.slipPath && <Btn kind="sec" onClick={viewPhoto}>View the slip photo</Btn>}
-      </div>
-      {slip?.error && <div className="v2-tag r" style={{ whiteSpace: 'normal' }}>{slip.error}</div>}
-      {slip?.data && (
-        <Card title="Read from the photo. Check against the slip" hi>
-          {slip.data.date && <Muted>Date on the slip: {isDate(slip.data.date) ? fmtDate(slip.data.date, { dow: true }) : slip.data.date}</Muted>}
-          {slip.data.columns.map((c, i) => {
-            const added = r2(c.weights.reduce((t, x) => t + x, 0));
-            const net = r2(added - num(c.deduction));
-            const sumOff = c.writtenTotal != null && Math.abs(c.writtenTotal - added) > 0.01;
-            const netOff = c.writtenNet != null && Math.abs(c.writtenNet - net) > 0.01;
-            return (
-              <div key={i} className="v2-line" style={{ padding: '8px 0' }}>
-                <div className="v2-cols" style={{ alignItems: 'flex-end' }}>
-                  <Field label={`Column ${i + 1}${c.heading ? ' · "' + c.heading + '"' : ''} was picked by`}>
-                    <Select value={slip.who[i]} onChange={(v) => setSlip((x) => ({ ...x, who: x.who.map((w, j) => (j === i ? v : w)) }))} options={workers.map((w) => [w.id, w.name])} placeholder="Who?" />
-                  </Field>
-                </div>
-                <div style={{ marginTop: 6 }}>{c.weights.length} bags: {c.weights.join(', ')}</div>
-                <Muted>Adds up to {added} kg{c.writtenTotal != null ? `, slip says ${c.writtenTotal}` : ''} · less {num(c.deduction)} = {net} kg{c.writtenNet != null ? `, slip says ${c.writtenNet}` : ''}{c.ratePerKg ? ` · × ₹${c.ratePerKg} = ${inr(net * c.ratePerKg)}${c.writtenAmount != null ? `, slip says ${inr(c.writtenAmount)}` : ''}` : ''}</Muted>
-                {(sumOff || netOff) && <div className="v2-tag" style={{ whiteSpace: 'normal', marginTop: 4 }}>The slip's own figures do not add up here. Check the bag weights against the paper.</div>}
+      <div className="v2-flab">Deduction on this slip</div>
+      <Chips label="How the deduction is written" options={[['worker', 'For each worker'], ['whole', 'One for the whole delivery']]} value={f.dedMode}
+        onChange={(v) => { set('dedMode', v); if (v === 'whole' && !f.bagDed) set('bagDed', String(r2(f.groups.reduce((t, g) => t + num(g.ded), 0) - num(f.waterDed)) || '')); }} />
+
+      {f.groups.map((g, gi) => {
+        const weighed = r2(g.bags.reduce((t, kg) => t + num(kg), 0));
+        const count = g.bags.filter((kg) => num(kg) > 0).length;
+        const w = wageOf(g.workerId);
+        const firstOfWorker = f.groups.findIndex((x) => x.workerId === g.workerId) === gi;
+        return (
+          <Card key={gi} title={`Worker ${gi + 1}`} right={f.groups.length > 1 ? <button type="button" className="v2-link" aria-label={`Remove worker ${gi + 1}`} onClick={() => set('groups', (gs) => gs.filter((_, j) => j !== gi))}>Remove</button> : null}>
+            <Select aria-label={`Worker ${gi + 1} name`} value={g.workerId} onChange={(v) => setGroup(gi, { workerId: v })} options={workers.map((x) => [x.id, x.name])} placeholder="Who picked these?" />
+            <div className="v2-flab">Bag weights (kg). Press Enter for the next bag.</div>
+            <div className="v2-bags">
+              {g.bags.map((kg, bi) => (
+                <input key={bi} className="v2-inp" type="text" inputMode="decimal" enterKeyHint="next" autoComplete="off" placeholder={String(bi + 1)}
+                  aria-label={`Worker ${gi + 1} bag ${bi + 1} kg`} value={kg} ref={(el) => { refs.current[`${gi}-${bi}`] = el; }}
+                  onKeyDown={(e) => onKey(e, gi, bi)} onChange={(e) => setBag(gi, bi, e.target.value.replace(/[^0-9.]/g, ''))}
+                  onBlur={() => { if (kg === '' && g.bags.length > 1 && bi < g.bags.length - 1) setGroup(gi, (x) => ({ bags: x.bags.filter((_, j) => j !== bi) })); }} />
+              ))}
+              <button type="button" className="v2-btn sec sm" onClick={() => addBag(gi)}>+ Bag</button>
+            </div>
+            <Row left={`${count} ${count === 1 ? 'bag' : 'bags'} weighed`} right={<strong>{weighed.toFixed(1)} kg</strong>} />
+            {perWorker && (
+              <div className="v2-row">
+                <label htmlFor={`ded-${gi}`}><strong>Deducted for this worker (kg)</strong><div className="v2-muted">Bags and water together, as on the slip</div></label>
+                <span style={{ width: 96, flex: 'none' }}><Num id={`ded-${gi}`} aria-label={`Worker ${gi + 1} deduction kg`} value={g.ded} onChange={(v) => setGroup(gi, { ded: v })} placeholder="0" /></span>
               </div>
-            );
-          })}
-          {slip.data.notes && <Muted>Reader's note: {slip.data.notes}</Muted>}
-          {!slip.kept && <Muted>The photo could not be stored, but the numbers were read.</Muted>}
-          <div className="v2-cols"><Btn onClick={applySlip}>Use these numbers</Btn><Btn kind="sec" onClick={() => setSlip(null)}>Ignore</Btn></div>
-          <Muted>This replaces the bags and deduction entered below. Nothing is saved until you press Save.</Muted>
-        </Card>
-      )}
+            )}
+            {perWorker && <Row left={`${weighed.toFixed(1)} − ${num(g.ded).toFixed(1)}`} right={<span className="v2-big">{r2(Math.max(0, weighed - num(g.ded))).toFixed(1)} kg</span>} />}
+            {can.money && w && firstOfWorker && count > 0 && (
+              <Row left={`Wages${w.kgRate ? ` · ${w.netKg.toFixed(1)} kg × ₹${w.kgRate}` : ''}${w.dayWage ? ` · ${w.days} day` : ''}`} right={<strong>{inr(w.wage)}</strong>} />
+            )}
+          </Card>
+        );
+      })}
+      <Btn kind="sec" onClick={addWorker}>+ Add another worker</Btn>
 
-      <Card title="Bags weighed" right={<span className="v2-muted">kg · picked by</span>}>
-        {f.bags.map((b, i) => (
-          <div className="v2-bagrow" key={i}>
-            <span>Bag {i + 1}</span>
-            <input className="v2-inp" type="text" inputMode="decimal" aria-label={`Bag ${i + 1} weight in kg`} placeholder="0.0" value={b.kg}
-              ref={(el) => { refs.current[i] = el; }} onKeyDown={(e) => onKey(e, i)}
-              onChange={(e) => setBag(i, 'kg', e.target.value.replace(/[^0-9.]/g, ''))} />
-            <Select aria-label={`Bag ${i + 1} picked by`} value={b.workerId} onChange={(v) => setBag(i, 'workerId', v)} options={workers.map((w) => [w.id, w.name])} placeholder="Who?" />
-            <button type="button" className="v2-x" aria-label={`Remove bag ${i + 1}`} onClick={() => set('bags', (bags) => (bags.length > 1 ? bags.filter((_, j) => j !== i) : bags))}>×</button>
+      <Card title={perWorker ? 'Total for this delivery' : 'Agent deduction, once for the whole delivery'}>
+        {!perWorker && (
+          <div className="v2-cols">
+            <Field label="For bags (kg)"><Num value={f.bagDed} onChange={(v) => set('bagDed', v)} placeholder="0" /></Field>
+            <Field label="For water (kg)"><Num value={f.waterDed} onChange={(v) => set('waterDed', v)} placeholder="0" /></Field>
           </div>
-        ))}
-        <Btn kind="sec" onClick={addBag}>+ Add bag</Btn>
-      </Card>
-
-      <Card title="Agent deduction, once for the whole delivery">
-        <div className="v2-cols">
-          <Field label="For bags (kg)"><Num value={f.bagDed} onChange={(v) => set('bagDed', v)} placeholder="0" /></Field>
-          <Field label="For water (kg)"><Num value={f.waterDed} onChange={(v) => set('waterDed', v)} placeholder="0" /></Field>
-        </div>
+        )}
         <Row left={`${preview.gross.toFixed(1)} weighed − ${preview.ded.toFixed(1)} deducted`} right={<span className="v2-big">{preview.net.toFixed(1)} kg</span>} />
+        {perWorker && preview.ded > 0 && (
+          <Field label="Of the deduction, how much was for water? (kg, optional)" hint="Used to compare rain with water deduction. Leave empty if the slip does not say.">
+            <Num value={f.waterDed} onChange={(v) => set('waterDed', v)} placeholder="0" />
+          </Field>
+        )}
+        {!perWorker && shaped.pickers.length > 1 && <Muted>The deduction is shared between the workers by the weight each picked.</Muted>}
         {preview.waterDed > 0 && <Muted>Water deduction is {preview.waterPct.toFixed(1)}% of the weight</Muted>}
         {preview.overDeducted && <div className="v2-tag r">The deduction is more than the weight of the bags.</div>}
+        {can.money && shaped.pickers.length > 1 && <Row left={<strong>Wages for this delivery</strong>} right={<strong>{inr(preview.wages)}</strong>} />}
       </Card>
 
       {can.money && (
-        <Card title="Worker wages, on net kg">
-          {preview.workers.filter((w) => w.workerId).map((w) => (
-            <Row key={w.workerId} left={`${books.nameOf(w.workerId)} · ${w.netKg.toFixed(1)} kg${w.kgRate ? ` × ₹${w.kgRate}` : ''}${w.dayWage ? ` · ${w.days} day` : ''}`} right={<strong>{inr(w.wage)}</strong>} />
-          ))}
-          {!preview.workers.some((w) => w.workerId) && <Muted>Enter a bag to see the wages.</Muted>}
+        <Card>
           {f.dayWork.map((w, i) => (
             <div className="v2-cols" key={i} style={{ alignItems: 'flex-end' }}>
               <Field label="On daily wage"><Select value={w.workerId} onChange={(v) => set('dayWork', (l) => l.map((x, j) => (j === i ? { ...x, workerId: v, dayRate: x.dayRate || String(books.personById.get(v)?.dayRate || '') } : x)))} options={workers.map((x) => [x.id, x.name])} placeholder="Who?" /></Field>
@@ -225,22 +233,6 @@ export default function Harvest({ id, query }) {
           ))}
           <button type="button" className="v2-link" onClick={() => set('dayWork', (l) => [...l, { workerId: '', days: '1', dayRate: '' }])}>Someone on daily wage today?</button>
           {f.dayWork.length > 0 && <Muted>A worker on daily wage is paid the day's wage instead of per kg for this harvest.</Muted>}
-          {pickers.length > 1 && !f.dedBy && <button type="button" className="v2-link" onClick={() => set('dedBy', Object.fromEntries(pickers.map((w) => [w, ''])))}>The slip gives a deduction for each worker</button>}
-          {pickers.length > 1 && f.dedBy && (
-            <div className="v2-stack" style={{ gap: 6, borderTop: '1px solid var(--line2)', paddingTop: 8 }}>
-              <div className="v2-flab">Deduction for each worker (kg)</div>
-              <div className="v2-cols">
-                {pickers.map((w) => <Field key={w} label={books.nameOf(w)}><Num value={f.dedBy[w] ?? ''} onChange={(v) => setOwnDed(w, v)} placeholder="0" /></Field>)}
-              </div>
-              {!preview.dedByWorker && <Muted>These must add up to the total deduction ({preview.ded.toFixed(1)} kg) before they are used.</Muted>}
-              <button type="button" className="v2-link" onClick={() => set('dedBy', null)}>Share the deduction by weight picked instead</button>
-            </div>
-          )}
-        </Card>
-      )}
-
-      {can.money && (
-        <Card>
           <Row top left={<strong>Agent rate</strong>} sub={linked ? `Set by the payment on ${fmtDate(linked.date)}` : 'Entered when the agent pays. The amount due stays blank until then.'}
             right={preview.rate != null ? <Tag kind="g">₹{preview.rate.toFixed(2)} · {inr(preview.value)}</Tag> : <Tag>Not known yet</Tag>} />
           <div className="v2-row top">
@@ -261,6 +253,12 @@ export default function Harvest({ id, query }) {
         </Card>
       )}
 
+      <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} aria-label="Photo of the slip" onChange={(e) => onPhoto(e.target.files[0])} />
+      <Card title="Photo of the slip, kept for reference">
+        {f.slipPath ? <Row left="A photo is attached" right={<button type="button" className="v2-link" onClick={viewPhoto}>View</button>} /> : <Muted>Optional. The photo is stored with this harvest so you can check the paper later. Nothing is read from it.</Muted>}
+        <Btn kind="sec" disabled={photoBusy} onClick={() => (demo ? say('Photos cannot be stored on sample data.', true) : fileRef.current.click())}>{photoBusy ? 'Storing the photo…' : f.slipPath ? 'Replace the photo' : 'Take or choose a photo'}</Btn>
+      </Card>
+
       {!more && <button type="button" className="v2-link" onClick={() => setMore(true)}>More: note, cut with machine{can.money ? ', rate already known' : ''}</button>}
       {more && (
         <Card title="More">
@@ -273,7 +271,7 @@ export default function Harvest({ id, query }) {
       <Btn block onClick={save} disabled={!!lease}>{existing ? 'Save changes' : 'Save harvest'}</Btn>
       {existing && <Btn kind="danger" block onClick={remove}>Delete this harvest</Btn>}
       {existing && <Muted>{existing.updatedAt ? `Last changed ${fmtDate(String(existing.updatedAt).slice(0, 10))}${existing.updatedBy ? ' by ' + existing.updatedBy : ''}. ` : ''}Earlier versions are kept in Settings → History of changes.</Muted>}
-      {!existing && <button type="button" className="v2-link" onClick={() => { setAll((x) => ({ ...x, bags: [{ kg: '', workerId: workers[0]?.id || '' }], bagDed: '', waterDed: '' })); say('Cleared'); }}>Clear the bags</button>}
+      {!existing && <button type="button" className="v2-link" onClick={() => { setAll((x) => ({ ...x, groups: [blankGroup(workers[0]?.id)], bagDed: '', waterDed: '' })); say('Cleared'); }}>Clear the bags</button>}
     </Page>
   );
 }

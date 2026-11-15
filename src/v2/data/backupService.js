@@ -22,11 +22,15 @@ async function toGitHub(name, json) {
   const text = await res.text();
   let body = {};
   try { body = JSON.parse(text); } catch (e) { /* not JSON: the function is not deployed */ }
-  if (!res.ok) throw new Error(body.error || `GitHub backup is not set up (${res.status})`);
+  if (!res.ok) {
+    throw new Error(body.error || (res.status === 404
+      ? 'The backup function is not on the site. In Netlify, check that Functions lists "backup-to-github" and redeploy.'
+      : `The backup function failed (${res.status}). Check the function log in Netlify.`));
+  }
   return body;
 }
 
-const short = (e) => String(e?.code || e?.message || e).replace('storage/', '').slice(0, 140);
+const short = (e) => String(e?.code || e?.message || e).replace('storage/', '').slice(0, 300);
 
 // Makes a backup and sends it to both places. Returns what happened to each.
 export async function runBackup(raw, { by, today, prefix = 'fo' }) {

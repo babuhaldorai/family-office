@@ -14,17 +14,18 @@ const assert = (c, m) => { if (!c) { throw new Error('ASSERT: ' + m); } console.
 
   // 1. harvest day: 3 bags of 50, one deduction of 10
   await nav('/harvest');
-  await page.getByLabel('Bag 1 weight in kg').fill('50');
-  await page.getByLabel('Bag 1 weight in kg').press('Enter');
-  await page.getByLabel('Bag 2 weight in kg').fill('50');
-  await page.getByLabel('Bag 2 weight in kg').press('Enter');
-  await page.getByLabel('Bag 3 weight in kg').fill('50');
-  await page.getByLabel('Bag 3 picked by').selectOption({ label: 'Selvi' });
+  await page.getByRole('button', { name: 'One for the whole delivery' }).click();
+  await page.getByLabel('Worker 1 bag 1 kg').fill('50');
+  await page.getByLabel('Worker 1 bag 1 kg').press('Enter');
+  await page.getByLabel('Worker 1 bag 2 kg').fill('50');
+  await page.getByRole('button', { name: '+ Add another worker' }).click();
+  await page.getByLabel('Worker 2 name').selectOption({ label: 'Selvi' });
+  await page.getByLabel('Worker 2 bag 1 kg').fill('50');
   await page.getByLabel('For bags (kg)').fill('5');
   await page.getByLabel('For water (kg)').fill('5');
   t = await text();
   assert(/150\.0 weighed − 10\.0 deducted/.test(t) && /140\.0 kg/.test(t), 'harvest form: 150 weighed, 10 deducted, 140 net');
-  assert(/Lakshmi · 93\.3 kg × ₹6[\s\S]*₹560/.test(t) && /Selvi · 46\.7 kg × ₹6[\s\S]*₹280/.test(t), 'wages preview 560 and 280');
+  assert(/93\.3 kg × ₹6[\s\S]*?₹560/.test(t) && /46\.7 kg × ₹6[\s\S]*?₹280/.test(t), 'wages preview 560 and 280');
   assert(/Not known yet/.test(t), 'rate not known yet');
   await page.getByRole('button', { name: 'Save harvest' }).click(); await page.waitForTimeout(400);
   t = await text();

@@ -168,3 +168,6 @@
   .v2 .v2-side a { padding: 0 12px; }
 }
 .v2 ::-webkit-scrollbar-track { background: transparent; }
+
+.v2-bags { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; align-items: center; }
+.v2 .v2-bags .v2-inp { padding: 8px 6px; text-align: center; }
