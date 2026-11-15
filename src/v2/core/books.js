@@ -137,6 +137,12 @@ export function computeDelivery(d, personById = new Map()) {
 }
 
 export function workCost(w, stockById = new Map()) {
+  // Work a lessee did on a leased field at their own cost: recorded for the
+  // field's history (when it was last manured), but it costs us nothing.
+  if (w.byLessee) {
+    const items = (w.items || []).map((it) => ({ ...it, qty: num(it.qty), fromStock: false, value: 0, direct: 0 }));
+    return { labour: 0, items, direct: 0, stockValue: 0, cost: 0, fieldCost: 0, bagsApplied: w.type === 'manure' ? sum(items, (it) => it.qty) : 0 };
+  }
   let labour = 0;
   if (w.labourMode === 'bag') labour = num(w.bags) * num(w.rate);
   else if (w.labourMode === 'fixed') labour = num(w.fixedAmount);

@@ -135,13 +135,30 @@ export function PayHow({ value, onChange, handlers, verb = 'paid', withDate = tr
   return (
     <>
       <div className="v2-flab">How was it {verb}?</div>
-      <Chips label="How" options={MODES} value={value.mode} onChange={(v) => set('mode', v)} />
+      <Chips label="How" options={[...MODES, ['', 'Not sure']]} value={value.mode || ''} onChange={(v) => set('mode', v)} />
       <div className="v2-flab">Who {verb === 'received' ? 'received it' : 'handled it'}?</div>
-      <Chips label="Who" options={handlers} value={value.by} onChange={(v) => set('by', v)} />
+      <Chips label="Who" options={[...handlers, ['', 'Not sure']]} value={value.by || ''} onChange={(v) => set('by', v)} />
       {withDate && <DateField label={dateLabel || `Date ${verb}`} value={value.date} onChange={(v) => set('date', v)} />}
     </>
   );
 }
+
+// "I don't know this bit — ask Ragu." Becomes an action item on Home for that
+// person, with a link straight back to this record.
+export function Ask({ value, onChange, handlers, suggestion = '' }) {
+  if (!value) return <button type="button" className="v2-link" onClick={() => onChange({ who: handlers[1] || handlers[0] || '', text: suggestion })}>Not sure about something here? Ask someone to fill it in</button>;
+  return (
+    <Card title="Ask someone to fill this in">
+      <div className="v2-flab">Who should answer?</div>
+      <Chips label="Who should answer" options={handlers} value={value.who} onChange={(v) => onChange({ ...value, who: v })} />
+      <Field label="What do you need from them?"><Text value={value.text} onChange={(v) => onChange({ ...value, text: v })} placeholder="How was this received, and who received it?" /></Field>
+      <Muted>It appears on Home under “To do” for them, with a link back to this entry. Save this entry to send it.</Muted>
+      <button type="button" className="v2-link" onClick={() => onChange(null)}>Do not ask</button>
+    </Card>
+  );
+}
+export const askOp = (ask, { link, about, by, date, id }) => (ask && ask.who && ask.text.trim()
+  ? [{ col: 'notes', id, data: { kind: 'todo', text: ask.text.trim(), about, assignee: ask.who, link, date, by, done: false } }] : []);
 
 export function Table({ head, rows, foot, onRow, onDelete, empty = 'Nothing here yet.' }) {
   if (!rows.length) return <Empty>{empty}</Empty>;

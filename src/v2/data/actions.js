@@ -171,8 +171,11 @@ export function workOps(form, books) {
   const id = form.id || uid();
   if (!form.date) return { error: 'Choose the date.' };
   if (!form.fieldId) return { error: 'Choose the field.' };
+  const byLessee = !!form.byLessee;
   const items = (form.items || []).filter((it) => num(it.qty) > 0 && (it.stockId || it.name))
-    .map((it) => ({ name: it.name || '', qty: num(it.qty), unitCost: it.stockId ? undefined : num(it.unitCost), stockId: it.stockId || undefined }));
+    .map((it) => (byLessee
+      ? { name: it.name || '', qty: num(it.qty) } // the lessee's own material: no cost, and never our stock
+      : { name: it.name || '', qty: num(it.qty), unitCost: it.stockId ? undefined : num(it.unitCost), stockId: it.stockId || undefined }));
   for (const it of items) {
     if (!it.stockId) continue;
     const s = books.stock.find((x) => x.id === it.stockId);
@@ -184,10 +187,11 @@ export function workOps(form, books) {
     date: form.date, fieldId: form.fieldId, type: form.type || 'other', oneTime: !!form.oneTime,
     labourMode: form.labourMode || 'day', people: num(form.people), days: num(form.days), rate: num(form.rate),
     bags: num(form.bags), fixedAmount: num(form.fixedAmount), items, comment: form.comment || '', createdAt: existing?.createdAt,
+    byLessee: byLessee || undefined,
   };
   const cost = workCost(doc, books.stockById).cost;
   const ops = [set('work', id, doc)];
-  withPayment(ops, books, id, form.pay, { kind: 'work', workId: id, date: form.date, amount: cost });
+  withPayment(ops, books, id, byLessee ? null : form.pay, { kind: 'work', workId: id, date: form.date, amount: cost });
   return { ops, id, cost };
 }
 

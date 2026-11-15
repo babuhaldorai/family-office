@@ -1,12 +1,12 @@
 // One form for every payment, in or out. The middle part changes with who the
 // payment is with; the bottom (amount, difference, how, who, when) is always
 // the same.
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useData } from '../data/DataContext';
-import { Page, Card, Row, Tag, Field, Num, Text, Select, Btn, Check, Muted, Chips, PayHow, back, go, useForm, href } from '../ui/kit';
+import { Page, Card, Row, Tag, Field, Num, Text, Select, Btn, Check, Muted, Chips, PayHow, Ask, askOp, back, go, useForm, href } from '../ui/kit';
 import { DIFF_REASONS, KINDS, settledCash } from '../core/books';
 import { paymentOps, removeEntryOps } from '../data/actions';
-import { inr, num, r2, sum, fmtDate, fmtMonth, monthKey, addMonths } from '../core/util';
+import { inr, num, r2, sum, fmtDate, fmtMonth, monthKey, addMonths, uid } from '../core/util';
 
 const TYPES = [['agent', 'Agent'], ['worker', 'Worker'], ['tenant', 'Tenant'], ['bill', 'Unpaid bill'], ['other', 'Something else']];
 const OTHER_KINDS = [
@@ -18,7 +18,8 @@ const typeOfKind = (k) => (k === 'tea_sale' ? 'agent' : k === 'wages' || k === '
     : k === 'work' || k === 'stock' || k === 'equipment' ? 'bill' : 'other');
 
 export default function Payment({ query }) {
-  const { books, today, can, run } = useData();
+  const { books, today, can, run, user } = useData();
+  const [ask, setAsk] = useState(null);
   const existing = query.entry ? books.entryById.get(query.entry) : null;
   const firstTenancy = books.tenancies.find((t) => t.isActive);
 
@@ -120,7 +121,9 @@ export default function Payment({ query }) {
     if (f.type === 'bill' && !bill) return run({ error: 'Choose the bill.' });
     if ((kind === 'home_expense' || kind === 'rental_expense') && !f.propertyId) return run({ error: 'Choose the property.' });
     if (kind === 'lease_deposit_return' && !f.leaseId) return run({ error: 'Choose the lease.' });
-    if (run(paymentOps(form, books), existing ? 'Payment updated' : 'Payment saved')) { if (existing) back('/reports/entries'); else go('/reports/entries'); }
+    const res = paymentOps(form, books);
+    if (!res.error) res.ops.push(...askOp(ask, { id: uid(), link: `/pay?entry=${res.id}`, about: `${KINDS[kind]?.cat || 'Payment'} · ${fmtDate(f.date)} · ${inr(amount)}`, by: user?.displayName || user?.email || '', date: today }));
+    if (run(res, existing ? 'Payment updated' : ask?.who ? `Payment saved and ${ask.who} asked` : 'Payment saved')) { if (existing) back('/reports/entries'); else go('/reports/entries'); }
     return null;
   };
   const remove = () => {
@@ -243,6 +246,14 @@ export default function Payment({ query }) {
         <Field label="Note (optional)"><Text value={f.note} onChange={(v) => set('note', v)} /></Field>
       </Card>
 
+      {existing && books.notes.filter((n) => n.kind === 'todo' && !n.done && n.link === `/pay?entry=${existing.id}`).map((n) => (
+        <Card key={n.id} title={`Question for ${n.assignee || 'someone'}`}>
+          <div>{n.text}</div>
+          <Muted>Asked by {n.by || 'someone'} on {fmtDate(n.date)}. Fill in the answer above, save, then mark it answered.</Muted>
+          <Btn kind="sec" onClick={() => run({ ops: [{ col: 'notes', id: n.id, patch: { done: true } }] }, 'Marked as answered')}>Mark as answered</Btn>
+        </Card>
+      ))}
+      <Ask value={ask} onChange={setAsk} handlers={books.handlers} suggestion={!f.mode || !f.by ? `How was this ${verb}, and who ${verb === 'received' ? 'received' : 'paid'} it?` : ''} />
       <Btn block onClick={save}>{existing ? 'Save changes' : 'Save payment'}</Btn>
       {existing && <Btn kind="danger" block onClick={remove}>Delete this payment</Btn>}
       {existing && <Muted>{existing.imported || existing.wasImported ? 'Brought in from the old app. ' : ''}{existing.updatedAt ? `Last changed ${fmtDate(String(existing.updatedAt).slice(0, 10))}${existing.updatedBy ? ' by ' + existing.updatedBy : ''}. ` : ''}Earlier versions are kept in <a href={href('/settings/history')}>History of changes</a>.</Muted>}

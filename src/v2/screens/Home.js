@@ -1,16 +1,21 @@
 import React, { useMemo, useState } from 'react';
 import { useData } from '../data/DataContext';
-import { Page, Card, Row, Tag, Money, Text, Btn, Muted, href } from '../ui/kit';
+import { Page, Card, Row, Tag, Money, Text, Btn, Muted, Select, href } from '../ui/kit';
 import { fmtDate, addDays, periodFor, uid, inr } from '../core/util';
 import { doBetter } from '../core/insights';
 
 export default function Home() {
   const { books, today, can, run, user } = useData();
   const [note, setNote] = useState('');
+  const [forWho, setForWho] = useState('');
+  // which person's items this device shows; remembered on the device
+  const [me, setMeState] = useState(() => { try { return window.localStorage.getItem('fo-me') || ''; } catch (e) { return ''; } });
+  const setMe = (v) => { setMeState(v); try { window.localStorage.setItem('fo-me', v); } catch (e) { /* private window */ } };
   const month = useMemo(() => books.pnl(periodFor('month', today)), [books, today]);
   const tips = useMemo(() => (can.money ? doBetter(books).slice(0, 2) : []), [books, can.money]);
 
-  const todos = books.notes.filter((n) => n.kind === 'todo' && !n.done);
+  const allTodos = books.notes.filter((n) => n.kind === 'todo' && !n.done).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const todos = allTodos.filter((n) => !me || !n.assignee || n.assignee === me);
   // days in the last three with no harvest and not marked "no harvest"
   const skipped = new Set(books.notes.filter((n) => n.kind === 'noharvest').map((n) => n.date));
   const harvested = new Set(books.deliveries.map((d) => d.date));
@@ -18,7 +23,7 @@ export default function Home() {
 
   const addNote = () => {
     if (!note.trim()) return;
-    run({ ops: [{ col: 'notes', id: uid(), data: { kind: 'todo', text: note.trim(), date: today, done: false, by: user?.displayName || '' } }] }, 'Kept for later');
+    run({ ops: [{ col: 'notes', id: uid(), data: { kind: 'todo', text: note.trim(), date: today, done: false, by: user?.displayName || '', assignee: forWho || undefined } }] }, forWho ? `Added for ${forWho}` : 'Kept for later');
     setNote('');
   };
   const linkFor = (a) => {
@@ -53,20 +58,26 @@ export default function Home() {
       {can.money && !empty && books.attention.length === 0 && <Card title="Needs attention"><Muted>Nothing is waiting. All paid up.</Muted></Card>}
 
       {can.harvest && (
-        <Card title="To log later">
+        <Card title="To do" right={(
+          <span style={{ width: 150 }}><Select aria-label="Whose items to show" value={me} onChange={setMe} options={books.handlers.map((h) => [h, `For ${h}`])} placeholder="Everyone's" /></span>
+        )}>
+          <Text value={note} onChange={setNote} placeholder="Type a note or a question…" aria-label="Quick note" onKeyDown={(e) => { if (e.key === 'Enter') addNote(); }} />
           <div style={{ display: 'flex', gap: 8 }}>
-            <Text value={note} onChange={setNote} placeholder="Type a quick note…" aria-label="Quick note" onKeyDown={(e) => { if (e.key === 'Enter') addNote(); }} />
-            <Btn kind="sec" onClick={addNote}>Keep</Btn>
+            <Select aria-label="Who is it for" value={forWho} onChange={setForWho} options={books.handlers.map((h) => [h, `For ${h}`])} placeholder="For anyone" />
+            <Btn kind="sec" onClick={addNote}>Add</Btn>
           </div>
           {todos.map((n) => (
             <div key={n.id} className="v2-row top">
-              <span>{n.text}<div className="v2-muted">Note · {fmtDate(n.date)}</div></span>
+              <span>{n.text}
+                <div className="v2-muted">{[n.about, n.assignee ? `For ${n.assignee}` : '', n.by ? `from ${n.by}` : '', fmtDate(n.date, { year: false })].filter(Boolean).join(' · ')}</div>
+              </span>
               <span style={{ display: 'flex', gap: 6, flex: 'none' }}>
-                <Tag to={href('/harvest')}>Log it</Tag>
+                {n.link ? <Tag to={'#' + n.link}>Open</Tag> : <Tag to={href('/harvest')}>Log it</Tag>}
                 <Tag kind="g" onClick={() => run({ ops: [{ col: 'notes', id: n.id, patch: { done: true } }] }, 'Marked done')}>Done</Tag>
               </span>
             </div>
           ))}
+          {me && allTodos.length > todos.length && <Muted>{allTodos.length - todos.length} more for other people. Choose “Everyone's” to see them.</Muted>}
           {missing.map((d) => (
             <div key={d} className="v2-row top">
               <span>No harvest entered for {fmtDate(d, { dow: true, year: false })}<div className="v2-muted">Reminder</div></span>

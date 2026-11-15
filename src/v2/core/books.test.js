@@ -95,6 +95,23 @@ describe('field work cost', () => {
   });
 });
 
+describe('work done by a lessee', () => {
+  test('is recorded with no cost, and still counts as the last time the field was manured', () => {
+    const c = workCost({ byLessee: true, type: 'manure', labourMode: 'bag', bags: 10, rate: 200, items: [{ name: 'NPK', qty: 10, unitCost: 1400 }] });
+    expect(c.cost).toBe(0);
+    expect(c.fieldCost).toBe(0);
+    expect(c.bagsApplied).toBe(10);
+    const data = sampleData();
+    const before = buildBooks(data, SAMPLE_TODAY);
+    const withLessee = buildBooks({ ...data, work: [...data.work, { id: 'lz', date: '2026-10-01', fieldId: 'f3', type: 'manure', byLessee: true, items: [{ name: 'NPK', qty: 10 }] }] }, SAMPLE_TODAY);
+    expect(withLessee.ok).toBe(true);
+    expect(withLessee.bills.length).toBe(before.bills.length);
+    expect(withLessee.pnl({ from: '0000-01-01', to: '9999-12-31' }).profit).toBe(before.pnl({ from: '0000-01-01', to: '9999-12-31' }).profit);
+    expect(withLessee.byField({ from: '0000-01-01', to: '9999-12-31' }).find((f) => f.fieldId === 'f3').work).toBe(0);
+    expect(fieldPlan(withLessee, 'f3').items.find((i) => i.type === 'manure').last).toBe('2026-10-01');
+  });
+});
+
 describe('the sample books', () => {
   const data = sampleData();
   const b = buildBooks(data, SAMPLE_TODAY);

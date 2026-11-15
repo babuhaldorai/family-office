@@ -27,6 +27,22 @@ export async function rainRecord(lat, lon, from, to, today) {
   return daily(j);
 }
 
+// Rain for many past dates at once (used to fill in old harvests). The archive
+// runs a few days behind, so the last weeks come from the recent record.
+export async function rainHistory(lat, lon, from, to, today) {
+  const out = new Map();
+  const recentFrom = addDays(today, -85);
+  const base = `latitude=${lat}&longitude=${lon}&daily=precipitation_sum&timezone=Asia%2FKolkata`;
+  if (from < recentFrom) {
+    const end = to < addDays(recentFrom, -1) ? to : addDays(recentFrom, -1);
+    daily(await getJSON(`https://archive-api.open-meteo.com/v1/archive?${base}&start_date=${from}&end_date=${end}`)).forEach((d) => out.set(d.date, d.mm));
+  }
+  if (to >= recentFrom) {
+    daily(await getJSON(`https://api.open-meteo.com/v1/forecast?${base}&past_days=90&forecast_days=1`)).forEach((d) => { if (d.date >= from && d.date <= to && d.date <= today) out.set(d.date, d.mm); });
+  }
+  return out;
+}
+
 // Rain expected over the next week.
 export async function rainForecast(lat, lon, today) {
   const j = await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=precipitation_sum&timezone=Asia%2FKolkata&forecast_days=8`);

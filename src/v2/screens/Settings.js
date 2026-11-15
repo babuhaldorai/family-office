@@ -4,8 +4,9 @@ import { Page, Card, Row, Tag, Field, Num, Text, Select, Btn, Check, Muted, Chip
 import { COLLECTIONS } from '../core/books';
 import { makeBackup, validateBackup, planRestore, entriesCSV, deliveriesCSV } from '../core/backup';
 import { mapOldData } from '../core/migrate';
+import { reminderSettings } from '../core/reminders';
 import { usageOf } from '../data/actions';
-import { findPlace } from '../data/weather';
+import { findPlace, rainHistory } from '../data/weather';
 import { inr, num, uid, fmtDate, addDays, parseLatLon } from '../core/util';
 
 const SECTIONS = [
@@ -16,7 +17,7 @@ const SECTIONS = [
   ['history', 'History of changes', 'Who changed what, and the old value', 'money'],
   ['bin', 'Recycle bin', 'Deleted entries, kept for 90 days', 'write'],
   ['import', 'Bring in data from the old app', 'Copy the old records into the new screens', 'admin'],
-  ['reminders', 'Reminders', 'What Home reminds you about', 'write'],
+  ['reminders', 'Reminders', 'Emails about rent not logged, and Home reminders', 'write'],
 ];
 const NAMES = { people: 'person', fields: 'field', properties: 'property', tenancies: 'tenancy', deliveries: 'harvest', work: 'field work', stock: 'manure purchase', equipment: 'equipment', leases: 'lease', entries: 'payment', rain: 'rain record', notes: 'note', settings: 'setting' };
 
@@ -130,16 +131,38 @@ function FieldForm({ id, onDone }) {
   const [paste, setPaste] = useState('');
   const agents = books.people.filter((p) => p.kind === 'agent');
   const setLink = (i, patch) => set('agentLinks', (l) => l.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-  const applyPaste = () => {
-    const pos = parseLatLon(paste);
-    if (!pos) return say(/goo\.gl|maps\.app/.test(paste) ? 'A short Google Maps link does not contain the position. In Google Maps, press and hold on the field, then copy the two numbers shown.' : 'Could not find a position in that. Paste the two numbers from Google Maps, like 11.4102, 76.6950.', true);
-    set('lat', pos.lat); set('lon', pos.lon); set('place', f.place && !/^Position /.test(f.place) ? f.place : `Position ${pos.lat.toFixed(4)}, ${pos.lon.toFixed(4)}`); setPaste('');
-    return say('Location set. Press Save.');
+  // A location is saved the moment it is chosen (for a field that already
+  // exists), so it cannot be lost by forgetting to press Save.
+  const setLocation = (lat, lon, place) => {
+    set('lat', lat); set('lon', lon); set('place', place);
+    if (x) run({ ops: [{ col: 'fields', id: x.id, patch: { lat, lon, place } }] }, 'Location saved');
+    else say('Location set. It is saved when you press Save.');
+  };
+  const applyPaste = (text = paste) => {
+    const pos = parseLatLon(text);
+    if (!pos) return say(/goo\.gl|maps\.app/.test(text) ? 'A short Google Maps link does not contain the position. In Google Maps, press and hold on the field, then copy the two numbers shown.' : 'Could not find a position in that. Paste the two numbers from Google Maps, like 11.4102, 76.6950.', true);
+    setLocation(pos.lat, pos.lon, `Position ${pos.lat.toFixed(4)}, ${pos.lon.toFixed(4)}`); setPaste('');
+    return null;
+  };
+  // old harvests on this field that have no rain figure get one from the weather record
+  const [filling, setFilling] = useState('');
+  const noRain = x ? books.deliveries.filter((d) => d.fieldId === x.id && (d.rainMm === null || d.rainMm === undefined) && d.date <= today) : [];
+  const fillRain = async () => {
+    if (!noRain.length) return;
+    setFilling(`Looking up rain for ${noRain.length} harvests…`);
+    try {
+      const dates = noRain.map((d) => d.date).sort();
+      const rain = await rainHistory(f.lat, f.lon, dates[0], dates[dates.length - 1], today);
+      const ops = noRain.filter((d) => rain.has(d.date)).map((d) => ({ col: 'deliveries', id: d.id, patch: { rainMm: rain.get(d.date), rainSource: 'weather record' } }));
+      if (!ops.length) say('The weather record has nothing for those dates yet.', true);
+      else run({ ops }, `Rain filled in for ${ops.length} of ${noRain.length} harvests`, { keepHistory: false, why: `rain filled in for ${x.name}` });
+    } catch (e) { say('Could not reach the weather record. Try again when online.', true); }
+    setFilling('');
   };
   const here = () => {
     if (!navigator.geolocation) return say('This device cannot give its position.', true);
     return navigator.geolocation.getCurrentPosition(
-      (p) => { set('lat', Number(p.coords.latitude.toFixed(5))); set('lon', Number(p.coords.longitude.toFixed(5))); set('place', 'Set while standing at the field'); say('Location set. Press Save.'); },
+      (p) => setLocation(Number(p.coords.latitude.toFixed(5)), Number(p.coords.longitude.toFixed(5)), 'Set while standing at the field'),
       () => say('The position was not allowed or not available. Paste it from Google Maps instead.', true),
       { enableHighAccuracy: true, timeout: 15000 },
     );
@@ -148,6 +171,8 @@ function FieldForm({ id, onDone }) {
   const [found, setFound] = useState(null);
   const used = x ? usageOf('fields', x.id, books) : 0;
   const search = async () => {
+    // numbers or a Google Maps address typed into the search box are a position, not a town name
+    if (parseLatLon(q)) { applyPaste(q); setQ(''); return; }
     setFound('…');
     try { setFound(await findPlace(q)); } catch (e) { setFound([]); }
   };
@@ -186,12 +211,19 @@ function FieldForm({ id, onDone }) {
         <div style={{ display: 'flex', gap: 8 }}><Text value={q} onChange={setQ} placeholder="Village or town" aria-label="Village or town" onKeyDown={(e) => { if (e.key === 'Enter') search(); }} /><Btn kind="sec" onClick={search}>Search</Btn></div>
         {found === '…' && <Muted>Searching…</Muted>}
         {Array.isArray(found) && found.length === 0 && <Muted>Nothing found. Try a bigger town nearby, or check the connection.</Muted>}
-        {Array.isArray(found) && found.map((r, i) => <Row key={i} onClick={() => { set('place', r.label); set('lat', r.lat); set('lon', r.lon); setFound(null); }} left={r.label} right={<Tag kind="g">Use</Tag>} />)}
+        {Array.isArray(found) && found.map((r, i) => <Row key={i} onClick={() => { setLocation(r.lat, r.lon, r.label); setFound(null); }} left={r.label} right={<Tag kind="g">Use</Tag>} />)}
         <div className="v2-flab" style={{ marginTop: 6 }}>Or the exact spot, from Google Maps</div>
         <Muted>In Google Maps, press and hold on the field (right-click on a computer) and copy the two numbers shown, or copy the page address. No Google account or payment is involved.</Muted>
-        <div style={{ display: 'flex', gap: 8 }}><Text value={paste} onChange={setPaste} placeholder="11.4102, 76.6950 or a Google Maps address" aria-label="Position from Google Maps" onKeyDown={(e) => { if (e.key === 'Enter') applyPaste(); }} /><Btn kind="sec" onClick={applyPaste}>Use</Btn></div>
+        <div style={{ display: 'flex', gap: 8 }}><Text value={paste} onChange={setPaste} placeholder="11.4102, 76.6950 or a Google Maps address" aria-label="Position from Google Maps" onKeyDown={(e) => { if (e.key === 'Enter') applyPaste(); }} /><Btn kind="sec" onClick={() => applyPaste()}>Use</Btn></div>
         <Btn kind="sec" onClick={here}>I am at the field now: use this spot</Btn>
         {f.lat !== '' && f.lat != null && <a href={`https://www.google.com/maps?q=${f.lat},${f.lon}`} target="_blank" rel="noreferrer">Check the saved spot on Google Maps</a>}
+        {x && f.lat !== '' && f.lat != null && (
+          <div className="v2-stack" style={{ gap: 6, borderTop: '1px solid var(--line2)', paddingTop: 8 }}>
+            <strong>Rain on past harvests</strong>
+            <Muted>Changing the location does not change harvests already saved; each keeps the rain it was saved with. {noRain.length ? `${noRain.length} harvests on this field have no rain figure.` : 'Every harvest on this field already has a rain figure.'} Figures you typed yourself are never replaced.</Muted>
+            {noRain.length > 0 && <Btn kind="sec" disabled={!!filling} onClick={fillRain}>{filling || `Fill in rain for those ${noRain.length} harvests`}</Btn>}
+          </div>
+        )}
       </Card>
       <div className="v2-cols"><Btn onClick={save}>Save</Btn><Btn kind="sec" onClick={onDone}>Cancel</Btn></div>
       {x && (used > 0
@@ -484,17 +516,60 @@ function ImportOld() {
 
 // ── Reminders ───────────────────────────────────────────────────────────────
 function Reminders() {
-  const { books, run } = useData();
+  const { books, raw, run, say, can, demo } = useData();
   const s = books.settings;
-  const save = (patch) => run({ ops: [{ col: 'settings', id: 'app', data: { ...s, id: 'app', handlers: books.handlers, ...patch } }] }, 'Saved');
+  const cfg = reminderSettings(s);
+  const state = (raw.settings || []).find((x) => x.id === 'reminderState');
+  const [emails, setEmails] = useState(((s.reminders && s.reminders.emails) || []).join(', '));
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const save = (patch, text = 'Saved') => run({ ops: [{ col: 'settings', id: 'app', data: { ...s, id: 'app', handlers: books.handlers, ...patch } }] }, text);
+  const saveReminders = (patch) => save({ reminders: { ...(s.reminders || {}), emails: cfg.emails, rent: cfg.rent, questions: cfg.questions, ...patch } });
+  const saveEmails = () => {
+    const list = emails.split(/[,;\s]+/).map((e) => e.trim()).filter(Boolean);
+    const bad = list.filter((e) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
+    if (bad.length) return say(`This does not look like an email address: ${bad[0]}`, true);
+    return saveReminders({ emails: list });
+  };
+  const test = async () => {
+    setBusy(true); setResult(null);
+    try {
+      const { auth } = await import('../../firebase');
+      const res = await fetch('/.netlify/functions/test-reminder', { method: 'POST', headers: { Authorization: 'Bearer ' + (await auth.currentUser.getIdToken()) } });
+      const text = await res.text();
+      let body = {};
+      try { body = JSON.parse(text); } catch (e) { /* not JSON */ }
+      if (res.status === 404) setResult({ error: 'The reminder function is not on the site yet. In Netlify, check that Functions lists "test-reminder" and redeploy.' });
+      else if (body.sent) setResult({ ok: `Sent to ${body.to.join(', ')}: “${body.subject}”. Check the inbox (and the spam folder the first time).` });
+      else setResult({ error: body.error || body.why || `The reminder function failed (${res.status}).` });
+    } catch (e) { setResult({ error: 'Could not reach the site. Check the connection.' }); }
+    setBusy(false);
+  };
+  const unpaid = books.tenancies.filter((t) => t.isActive && t.unpaidMonths.length);
   return (
     <>
+      <Card title="Email reminders">
+        <Field label="Send to these email addresses" hint="Separate several with commas."><Text value={emails} onChange={setEmails} placeholder="you@example.com, ragu@example.com" inputMode="email" /></Field>
+        <Btn kind="sec" onClick={saveEmails}>Save addresses</Btn>
+        <Check checked={cfg.rent.on} onChange={(v) => saveReminders({ rent: { ...cfg.rent, on: v } })}><strong>Rent not logged</strong><div className="v2-muted">Starts once the rent is due and keeps going until it is recorded in the app.</div></Check>
+        {cfg.rent.on && (
+          <label className="v2-row"><span>Remind again</span><span style={{ width: 170 }}><Select value={String(cfg.rent.everyDays)} onChange={(v) => saveReminders({ rent: { ...cfg.rent, everyDays: Number(v) } })} options={[['1', 'Every day'], ['2', 'Every 2 days'], ['3', 'Every 3 days'], ['7', 'Every week']]} /></span></label>
+        )}
+        <Check checked={cfg.questions.on} onChange={(v) => saveReminders({ questions: { on: v } })}><strong>Questions waiting for someone</strong><div className="v2-muted">Added to the rent email, or sent once a week on their own.</div></Check>
+        <Muted>Emails go out at 7:00 pm India time. Right now {unpaid.length ? `${unpaid.length} ${unpaid.length === 1 ? 'property has' : 'properties have'} rent not logged: ${unpaid.map((t) => t.propertyName).join(', ')}.` : 'no rent is unpaid, so nothing would be sent.'}</Muted>
+        {state && state.lastSentAt && <Muted>Last email: {fmtDate(String(state.lastSentAt).slice(0, 10))} to {state.lastTo} — “{state.lastSubject}”.</Muted>}
+      </Card>
+      {can.admin && (
+        <Card title="Check that it works">
+          <Muted>Sends today's reminder straight away, even if one already went out. If something is not set up yet, this says exactly what is missing.</Muted>
+          <Btn kind="sec" disabled={busy} onClick={() => (demo ? say('Emails cannot be sent from sample data.', true) : test())}>{busy ? 'Sending…' : 'Send a test email now'}</Btn>
+          {result && result.ok && <div className="v2-tag g" style={{ whiteSpace: 'normal' }}>{result.ok}</div>}
+          {result && result.error && <div className="v2-tag r" style={{ whiteSpace: 'normal' }}>{result.error}</div>}
+        </Card>
+      )}
       <Card title="On the Home screen">
         <Check checked={s.remindHarvest !== false} onChange={(v) => save({ remindHarvest: v })}>Remind me when no harvest was entered for one of the last 3 days</Check>
         <Muted>Rent not received, agents who have not paid, wages due, unpaid bills and leases ending within 30 days always show under “Needs attention”.</Muted>
-      </Card>
-      <Card title="By email">
-        <Muted>Email reminders are not switched on yet. They need a mail-sending account and a scheduled server job, which are the next piece to set up. Until then, reminders appear on Home only.</Muted>
       </Card>
     </>
   );

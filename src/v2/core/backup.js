@@ -12,7 +12,8 @@ export const BACKUP_VERSION = 2;
 // fields that change on every write and say nothing about the content
 const strip = (doc) => { const { _pending, ...rest } = doc; return rest; };
 // the record of the last backup must not itself count as a change
-const isBackupMarker = (col, doc) => col === 'settings' && doc.id === 'backup';
+// (nor the note of when the last reminder email went out)
+const isBackupMarker = (col, doc) => col === 'settings' && (doc.id === 'backup' || doc.id === 'reminderState');
 
 const sorted = (raw, { forFingerprint = false } = {}) => {
   const out = {};

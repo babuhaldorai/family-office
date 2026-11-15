@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useData } from '../data/DataContext';
-import { Page, Card, Row, Tag, Money, Tabs, Field, Num, Text, Area, Select, DateField, Btn, Check, Muted, Chips, PayHow, BarRow, go, back, href, useForm } from '../ui/kit';
+import { Page, Card, Row, Tag, Money, Tabs, Field, Num, Text, Area, Select, DateField, Btn, Check, Muted, Chips, PayHow, BarRow, Ask, askOp, go, back, href, useForm } from '../ui/kit';
 import { usePeriod, PeriodPicker } from '../ui/Period';
 import { WORK_TYPES, workCost } from '../core/books';
 import { fieldPlan, yearAhead, leaseAdvice, beforeAfter, scheduleOf } from '../core/insights';
 import { workOps, stockOps, leaseOps, removeWithPayments } from '../data/actions';
 import { useDelete } from '../data/useDelete';
 import { rainForecast } from '../data/weather';
-import { inr, num, sum, fmtDate } from '../core/util';
+import { inr, num, sum, fmtDate, uid } from '../core/util';
 
 const TABS = [['plan', 'Plan'], ['work', 'Work done'], ['money', 'Money'], ['lease', 'Lease']];
 const TAG = { now: '', soon: '', ok: 'g', watch: 'n', unknown: 'n' };
@@ -99,8 +99,8 @@ function Work({ field, startAdding, editId }) {
               <Row top onClick={can.harvest ? () => setEditing(w.id) : undefined}
                 onDelete={can.harvest ? () => del.bill('work', w.id, `this ${w.typeLabel.toLowerCase()} of ${fmtDate(w.date)}`) : undefined} deleteLabel={`Delete ${w.typeLabel} of ${fmtDate(w.date)}`}
                 left={<><strong>{w.typeLabel}</strong> · {fmtDate(w.date)}{w.oneTime ? ' · one-time' : ''}</>}
-                sub={[w.bagsApplied ? `${w.bagsApplied} bags` : '', w.comment, w.due > 0.5 ? 'not paid yet' : ''].filter(Boolean).join(' · ')}
-                right={can.money ? <Money v={w.fieldCost} /> : null} />
+                sub={[w.byLessee ? 'done by the lessee' : '', w.bagsApplied ? `${w.bagsApplied} bags` : '', w.byLessee ? w.items.map((it) => it.name).filter(Boolean).join(', ') : '', w.comment, w.due > 0.5 ? 'not paid yet' : ''].filter(Boolean).join(' · ')}
+                right={w.byLessee ? <Tag kind="n">No cost to you</Tag> : can.money ? <Money v={w.fieldCost} /> : null} />
               {ba && ba.pct != null && (
                 <div style={{ padding: '4px 0 8px' }}>
                   <div className="v2-flab">Did it help? Kg per acre each week</div>
@@ -128,10 +128,11 @@ export function WorkForm({ field, id, presetType, onDone }) {
     labourMode: existing.labourMode || 'day', people: String(existing.people || ''), days: String(existing.days || ''), rate: String(existing.rate || ''),
     bags: String(existing.bags || ''), fixedAmount: String(existing.fixedAmount || ''),
     items: (existing.items || []).map((it) => ({ ...it, qty: String(it.qty), unitCost: it.unitCost != null ? String(it.unitCost) : '' })),
-    comment: existing.comment || '', pay: { paid: !!pay0 || existing.due < 0.5, mode: pay0?.mode || 'cash', by: pay0?.by || books.handlers[0], date: pay0?.date || existing.date },
+    byLessee: !!existing.byLessee, comment: existing.comment || '', pay: { paid: !!pay0 || existing.due < 0.5, mode: pay0?.mode || 'cash', by: pay0?.by || books.handlers[0], date: pay0?.date || existing.date },
   } : {
     date: today, fieldId: field.id, type: presetType || 'weeding', oneTime: false, labourMode: presetType === 'manure' ? 'bag' : 'day',
     people: '', days: '1', rate: '', bags: '', fixedAmount: '', items: [], comment: '', pay: { paid: true, mode: 'cash', by: books.handlers[0], date: today },
+    byLessee: !!books.activeLeaseOn(field.id, today),
   });
   const stockLeft = books.stock.filter((s) => s.left > 0 || f.items.some((it) => it.stockId === s.id));
   const stockBags = sum(f.items.filter((it) => it.stockId), (it) => num(it.qty));
@@ -153,32 +154,34 @@ export function WorkForm({ field, id, presetType, onDone }) {
           <Field label="Field"><Select value={f.fieldId} onChange={(v) => set('fieldId', v)} options={books.fields.map((x) => [x.id, x.name])} /></Field>
           <DateField value={f.date} onChange={(v) => { set('date', v); set('pay', (p) => ({ ...p, date: v })); }} />
         </div>
-        {lease && <div className="v2-tag" style={{ whiteSpace: 'normal' }}>This field is leased to {lease.lessee || 'someone'} on that date. Log this only if you paid for the work yourself.</div>}
+        {(lease || f.byLessee) && (
+          <Check checked={f.byLessee} onChange={(v) => set('byLessee', v)}><strong>Done and paid for by the lessee{lease?.lessee ? ` (${lease.lessee})` : ''}</strong><div className="v2-muted">Kept as a record of what was done to the field. No cost is entered and nothing is added to your expenses.</div></Check>
+        )}
         <div className="v2-flab">What was done?</div>
         <Chips label="What was done" options={WORK_TYPES} value={f.type} onChange={(v) => { set('type', v); if (v === 'manure' && !existing) set('labourMode', 'bag'); }} />
         <Check checked={f.oneTime} onChange={(v) => set('oneTime', v)}><strong>One-time work, not routine</strong><div className="v2-muted">Fencing, a new path, land clearing. Shown separately in reports and kept out of the regular cost per kg.</div></Check>
       </Card>
-      <Card title="Labour">
+      {!f.byLessee && <Card title="Labour">
         <Chips label="How labour is paid" options={[['day', 'Per day'], ['bag', 'Per bag'], ['fixed', 'Fixed amount']]} value={f.labourMode} onChange={(v) => set('labourMode', v)} />
         {f.labourMode === 'day' && <div className="v2-cols"><Field label="People"><Num value={f.people} onChange={(v) => set('people', v)} /></Field><Field label="Days"><Num value={f.days} onChange={(v) => set('days', v)} /></Field><Field label="₹ per day"><Num value={f.rate} onChange={(v) => set('rate', v)} /></Field></div>}
         {f.labourMode === 'bag' && <div className="v2-cols"><Field label="Bags applied"><Num value={f.bags === '' && stockBags ? String(stockBags) : f.bags} onChange={(v) => set('bags', v)} /></Field><Field label="₹ per bag to apply"><Num value={f.rate} onChange={(v) => set('rate', v)} placeholder="200" /></Field></div>}
         {f.labourMode === 'fixed' && <Field label="Amount agreed (₹)"><Num value={f.fixedAmount} onChange={(v) => set('fixedAmount', v)} /></Field>}
         {can.money && <Row left="Labour" right={<strong>{inr(cost.labour)}</strong>} />}
-      </Card>
-      <Card title={f.type === 'manure' ? 'Manure used' : 'Material and hire charges'}>
+      </Card>}
+      <Card title={f.byLessee ? 'What they used, if you know' : f.type === 'manure' ? 'Manure used' : 'Material and hire charges'}>
         {f.items.map((it, i) => (
           <div key={i} className="v2-cols" style={{ alignItems: 'flex-end' }}>
-            <Field label="From"><Select value={it.stockId || ''} onChange={(v) => setItem(i, { stockId: v || undefined, name: v ? books.stockById.get(v)?.name : it.name })} options={stockLeft.map((s) => [s.id, `Stock: ${s.name} · ${s.left} left`])} placeholder="Bought for this job" /></Field>
-            {!it.stockId && <Field label="What"><Text value={it.name} onChange={(v) => setItem(i, { name: v })} placeholder="Pesticide, sprayer hire…" /></Field>}
-            <Field label={it.stockId ? 'Bags' : 'Quantity'}><Num value={it.qty} onChange={(v) => setItem(i, { qty: v })} /></Field>
-            {!it.stockId && <Field label="₹ each"><Num value={it.unitCost} onChange={(v) => setItem(i, { unitCost: v })} /></Field>}
+            {!f.byLessee && <Field label="From"><Select value={it.stockId || ''} onChange={(v) => setItem(i, { stockId: v || undefined, name: v ? books.stockById.get(v)?.name : it.name })} options={stockLeft.map((s) => [s.id, `Stock: ${s.name} · ${s.left} left`])} placeholder="Bought for this job" /></Field>}
+            {(f.byLessee || !it.stockId) && <Field label="What"><Text value={it.name} onChange={(v) => setItem(i, { name: v })} placeholder="Pesticide, sprayer hire…" /></Field>}
+            <Field label={!f.byLessee && it.stockId ? 'Bags' : f.type === 'manure' ? 'Bags' : 'Quantity'}><Num value={it.qty} onChange={(v) => setItem(i, { qty: v })} /></Field>
+            {!f.byLessee && !it.stockId && <Field label="₹ each"><Num value={it.unitCost} onChange={(v) => setItem(i, { unitCost: v })} /></Field>}
             <button type="button" className="v2-x" style={{ flex: 'none' }} aria-label="Remove" onClick={() => set('items', (l) => l.filter((_, j) => j !== i))}>×</button>
           </div>
         ))}
-        <button type="button" className="v2-link" onClick={() => set('items', (l) => [...l, { stockId: f.type === 'manure' && stockLeft[0] ? stockLeft[0].id : undefined, name: f.type === 'manure' && stockLeft[0] ? stockLeft[0].name : '', qty: '', unitCost: '' }])}>+ Add {f.type === 'manure' ? 'manure' : 'material or hire charge'}</button>
-        {f.type === 'manure' && <Muted>Manure taken from stock was paid for when it was bought, so only the applying is paid now. Its cost still counts against this field.{stockLeft.length === 0 ? ' No stock is left: ' : ' '}<a href={href('/stock')}>Log a new purchase</a>.</Muted>}
+        <button type="button" className="v2-link" onClick={() => set('items', (l) => [...l, { stockId: !f.byLessee && f.type === 'manure' && stockLeft[0] ? stockLeft[0].id : undefined, name: !f.byLessee && f.type === 'manure' && stockLeft[0] ? stockLeft[0].name : '', qty: '', unitCost: '' }])}>+ Add {f.type === 'manure' ? 'manure' : 'material or hire charge'}</button>
+        {f.type === 'manure' && !f.byLessee && <Muted>Manure taken from stock was paid for when it was bought, so only the applying is paid now. Its cost still counts against this field.{stockLeft.length === 0 ? ' No stock is left: ' : ' '}<a href={href('/stock')}>Log a new purchase</a>.</Muted>}
       </Card>
-      {can.money && (
+      {can.money && !f.byLessee && (
         <Card>
           <Row left={<strong>To pay for this work</strong>} right={<span className="v2-big">{inr(overridden ? existing.cost : cost.cost)}</span>} />
           {cost.stockValue > 0 && <Row left="Plus manure from stock, already paid" right={<Money v={cost.stockValue} />} />}
@@ -281,14 +284,20 @@ function Lease({ field }) {
 }
 
 function LeaseForm({ field, id, onDone }) {
-  const { books, today, run } = useData();
+  const { books, today, run, user } = useData();
+  const [ask, setAsk] = useState(null);
   const existing = id ? books.leaseById.get(id) : null;
   const pay0 = existing ? books.entryById.get('pay-' + existing.id) : null;
   const [f, set] = useForm(() => existing ? {
     id: existing.id, fieldId: existing.fieldId, lessee: existing.lessee || '', phone: existing.phone || '', start: existing.start, end: existing.end, kind: existing.kind, amount: String(existing.amount), note: existing.note || '',
     pay: { paid: !!pay0 || existing.received > 0, mode: pay0?.mode || 'bank', by: pay0?.by || books.handlers[0], date: pay0?.date || existing.start },
   } : { fieldId: field.id, lessee: '', phone: '', start: today, end: '', kind: '', amount: '', note: '', pay: { paid: true, mode: 'bank', by: books.handlers[0], date: today } });
-  const save = () => { if (run(leaseOps({ ...f, pay: { ...f.pay, date: f.pay.date || f.start } }, books), 'Lease saved')) onDone(); };
+  const link = `/field/${field.id}/lease`;
+  const save = () => {
+    const res = leaseOps({ ...f, pay: { ...f.pay, date: f.pay.date || f.start } }, books);
+    if (!res.error) res.ops.push(...askOp(ask, { id: uid(), link, about: `Lease of ${field.name}${f.lessee ? ' to ' + f.lessee : ''}`, by: user?.displayName || user?.email || '', date: today }));
+    if (run(res, ask?.who ? `Lease saved and ${ask.who} asked` : 'Lease saved')) onDone();
+  };
   return (
     <>
       <Card title={existing ? 'Edit lease' : 'Lease this field'} hi>
@@ -305,6 +314,14 @@ function LeaseForm({ field, id, onDone }) {
         {f.pay.paid && <PayHow value={f.pay} onChange={(v) => set('pay', (p) => ({ ...p, ...v }))} handlers={books.handlers} verb="received" />}
       </Card>
       <Field label="Notes (fertilizer the lessee uses, conditions, anything agreed)"><Area value={f.note} onChange={(v) => set('note', v)} /></Field>
+      {books.notes.filter((n) => n.kind === 'todo' && !n.done && n.link === link).map((n) => (
+        <Card key={n.id} title={`Question for ${n.assignee || 'someone'}`}>
+          <div>{n.text}</div>
+          <Muted>Asked by {n.by || 'someone'} on {fmtDate(n.date)}.</Muted>
+          <Btn kind="sec" onClick={() => run({ ops: [{ col: 'notes', id: n.id, patch: { done: true } }] }, 'Marked as answered')}>Mark as answered</Btn>
+        </Card>
+      ))}
+      <Ask value={ask} onChange={setAsk} handlers={books.handlers} suggestion={!f.pay.mode || !f.pay.by ? 'How was the lease amount received, and who received it?' : ''} />
       <Muted>No harvest can be logged on this field while it is leased. Home reminds you 30 days before the lease ends.</Muted>
       <div className="v2-cols"><Btn onClick={save}>Save lease</Btn><Btn kind="sec" onClick={onDone}>Cancel</Btn></div>
       {existing && <Btn kind="danger" onClick={() => { if (window.confirm('Move this lease and the payments recorded for it to the recycle bin?') && run(removeWithPayments('leases', existing.id, books), 'Moved to the recycle bin')) onDone(); }}>Delete</Btn>}

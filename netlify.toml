@@ -9,3 +9,9 @@
 
 [functions]
   directory = "netlify/staging-functions"
+  # functions import shared code from src/ (written as ES modules)
+  node_bundler = "esbuild"
+
+# 13:30 UTC = 7:00 pm in India, every day
+[functions."send-reminders"]
+  schedule = "30 13 * * *"

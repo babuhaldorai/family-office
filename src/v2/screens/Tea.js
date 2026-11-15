@@ -137,7 +137,7 @@ function Fields() {
               <Row left={`${f.acres || '?'} acres`} right={lastH ? `Last harvest ${fmtDate(lastH.date, { year: false })}` : 'No harvest yet'} />
               <div className="v2-cols">
                 <a className="v2-btn sec" href={href('/field/' + f.id)}>Plan and history</a>
-                {can.harvest && !lease && <a className="v2-btn sec" href={href('/field/' + f.id + '/work', { add: 1 })}>+ Field work</a>}
+                {can.harvest && <a className="v2-btn sec" href={href('/field/' + f.id + '/work', { add: 1 })}>+ Field work</a>}
               </div>
             </Card>
           );

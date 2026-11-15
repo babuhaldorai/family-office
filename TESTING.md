@@ -62,7 +62,7 @@ The old app stays available under Settings → "Open the old app" so you can com
 
 ## What is not built yet
 
-- **Email reminders.** Reminders appear on Home. Sending email needs a mail account and a scheduled server job.
+- **Email reminders** are built and tested against simulated services, not yet against the real ones. They need a Firebase service account and a Brevo key on the Netlify site; Settings → Reminders → "Send a test email now" reports what is missing.
 - **Reading numbers from a slip photo.** Removed because it would be a paid service. The harvest form keeps a photo of the slip for reference instead (needs the updated `storage.rules`).
 - **Restore directly from GitHub.** Backups go to GitHub; to restore from one, download the file from the
   repository and use "restore from a file". Restore from the bucket works in the app.
