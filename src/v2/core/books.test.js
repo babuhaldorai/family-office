@@ -1,4 +1,5 @@
-import { buildBooks, computeDelivery, workCost, settledCash, agentForField } from './books';
+import { buildBooks, computeDelivery, workCost, settledCash, agentForField, agentConflicts } from './books';
+import { nextHarvests, manureNeeds, pendingWork, summaryForAI } from './planner';
 import { sampleData, SAMPLE_TODAY } from './sample';
 import { todayIST, inr, fmtDate, addMonths, periodFor, sum, r2, parseLatLon } from './util';
 import { doBetter, fieldPlan, leaseAdvice, forecastNextMonth, yearAhead, beforeAfter } from './insights';
@@ -272,6 +273,47 @@ describe('the sample books', () => {
     const ba = beforeAfter(b, b.workById.get('k4'));
     expect(ba.before.kg).toBeGreaterThan(0);
     expect(ba.after.kg).toBeGreaterThan(0);
+  });
+});
+
+describe('changing the usual agent of a field', () => {
+  const ds = [
+    { id: '1', fieldId: 'f', agentId: 'a1', date: '2026-03-01' },
+    { id: '2', fieldId: 'f', agentId: 'a2', date: '2026-03-05' },
+    { id: '3', fieldId: 'f', agentId: 'a1', date: '2026-08-01' },
+    { id: '4', fieldId: 'other', agentId: 'a2', date: '2026-03-05' },
+    { id: '5', fieldId: 'f', agentId: 'a2', date: '2025-01-01' },
+  ];
+  test('past harvests that went to another agent are found, only for dates the list covers', () => {
+    const links = [{ agentId: 'a1', from: '2026-01-01', to: '2026-06-30' }, { agentId: 'a2', from: '2026-07-01', to: '' }];
+    expect(agentConflicts('f', links, ds).map((c) => c.id)).toEqual(['3', '2']);
+    expect(agentConflicts('f', [], ds)).toEqual([]);
+  });
+});
+
+describe('planning ahead', () => {
+  const b = buildBooks(sampleData(), SAMPLE_TODAY);
+  test('next harvest per field comes from that field\'s own rounds', () => {
+    const rows = nextHarvests(b);
+    const upper = rows.find((r) => r.fieldId === 'f1');
+    expect(upper.gap).toBeGreaterThan(1);
+    expect(upper.kgLow).toBeLessThan(upper.kgHigh);
+    expect(upper.workers).toBeGreaterThanOrEqual(1);
+    expect(rows.find((r) => r.fieldId === 'f3').leased).toBe('Kumar');
+  });
+  test('manure to have ready is what the due fields usually take, less what is in stock', () => {
+    const m = manureNeeds(b);
+    const road = m.rows.find((r) => r.fieldId === 'f2');
+    expect(road.status).toBe('now');
+    expect(road.bags).toBe(10);
+    expect(m.inStock).toBe(12);
+    expect(m.toBuy).toBe(Math.max(0, m.need - 12));
+  });
+  test('pending work and the summary for an AI are produced, with no worker or tenant names in the summary', () => {
+    expect(pendingWork(b).length).toBeGreaterThan(3);
+    const s = summaryForAI(b);
+    expect(s).toMatch(/TEA FIELDS/);
+    ['Lakshmi', 'Selvi', 'Murugan', 'Anand', 'Priya', 'Kumar'].forEach((n) => expect(s.includes(n)).toBe(false));
   });
 });
 

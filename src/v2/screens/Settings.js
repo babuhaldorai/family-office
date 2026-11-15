@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useData, ROLES, ROLE_LABEL } from '../data/DataContext';
 import { Page, Card, Row, Tag, Field, Num, Text, Select, Btn, Check, Muted, Chips, Table, DateField, href, download, useForm } from '../ui/kit';
-import { COLLECTIONS } from '../core/books';
+import { COLLECTIONS, agentConflicts } from '../core/books';
 import { makeBackup, validateBackup, planRestore, entriesCSV, deliveriesCSV } from '../core/backup';
 import { mapOldData } from '../core/migrate';
-import { reminderSettings } from '../core/reminders';
+import { reminderRecipients, blankRecipient } from '../core/reminders';
 import { usageOf } from '../data/actions';
 import { findPlace, rainHistory } from '../data/weather';
 import { inr, num, uid, fmtDate, addDays, parseLatLon } from '../core/util';
@@ -185,6 +185,12 @@ function FieldForm({ id, onDone }) {
       if (i < links.length - 1 && !links[i].to && links[i + 1].from) links[i].to = addDays(links[i + 1].from, -1);
       if (i < links.length - 1 && links[i].to && links[i + 1].from && links[i].to >= links[i + 1].from) return run({ error: 'Two agent lines cover the same dates. Change the dates so only one applies on any day.' });
     }
+    // past harvests on this field that went to a different agent than this list now says
+    const clashes = x ? agentConflicts(x.id, links, books.deliveries) : [];
+    if (clashes.length) {
+      const shown = clashes.slice(0, 6).map((c) => `  ${fmtDate(c.date)}: went to ${books.nameOf(c.agentId) || 'unknown'}, list says ${books.nameOf(c.usual)}`).join('\n');
+      if (!window.confirm(`${clashes.length} past ${clashes.length === 1 ? 'harvest' : 'harvests'} on ${f.name} went to a different agent than this list says:\n\n${shown}${clashes.length > 6 ? `\n  …and ${clashes.length - 6} more` : ''}\n\nThose harvests are NOT changed by saving. If the list is wrong, press Cancel and fix the dates. If a harvest is wrong, open it in Tea → Harvest and change its agent.\n\nSave the list anyway?`)) return null;
+    }
     const doc = { ...f, id: id || uid(), name: f.name.trim(), acres: num(f.acres) || '', agentLinks: links };
     if (run({ ops: [{ col: 'fields', id: doc.id, data: doc }] }, 'Saved')) onDone();
     return null;
@@ -205,6 +211,15 @@ function FieldForm({ id, onDone }) {
           </div>
         ))}
         <button type="button" className="v2-link" onClick={() => set('agentLinks', (list) => [...list, { agentId: '', from: list.length ? today : '', to: '' }])}>{f.agentLinks.length ? '+ The agent changed' : '+ Set the usual agent'}</button>
+        {x && (() => {
+          const clashes = agentConflicts(x.id, f.agentLinks.filter((l) => l.agentId), books.deliveries);
+          if (!clashes.length) return null;
+          return (
+            <div className="v2-tag r" style={{ whiteSpace: 'normal' }}>
+              {clashes.length} past {clashes.length === 1 ? 'harvest' : 'harvests'} on this field went to a different agent than this list says, most recently {fmtDate(clashes[0].date)} ({books.nameOf(clashes[0].agentId)} instead of {books.nameOf(clashes[0].usual)}). Saving does not change those harvests. Check the dates above.
+            </div>
+          );
+        })()}
       </Card>
       <Card title="Location, for automatic rain">
         <Muted>{f.lat !== '' && f.lat != null ? `Set to ${f.place || 'a location'} (${Number(f.lat).toFixed(2)}, ${Number(f.lon).toFixed(2)}).` : 'Not set. Search for the nearest village or town.'}</Muted>
@@ -353,7 +368,7 @@ function Backup() {
         {marker && marker.bucket && marker.bucket !== 'ok' && <div className="v2-tag r" style={{ whiteSpace: 'normal' }}>Bucket: {marker.bucket}</div>}
         <Row left="Private GitHub repository" right={status(marker?.github)} />
         {marker && marker.github && marker.github !== 'ok' && <div className="v2-tag r" style={{ whiteSpace: 'normal' }}>GitHub: {marker.github}</div>}
-        <Muted>A backup is made automatically when an Owner or Manager opens the app and something has changed since the last one. On days with no change, nothing is saved.</Muted>
+        <Muted>A backup is made automatically every night at 2:00 am India time, only if something has changed since the last one. On days with no change, nothing is saved. “Back up now” makes one straight away.</Muted>
         <div className="v2-cols"><Btn onClick={backupNow} disabled={!!busy}>{busy || 'Back up now'}</Btn><Btn kind="sec" onClick={toDevice}>Download a copy to this device</Btn></div>
       </Card>
       <Card title="Restore">
@@ -518,18 +533,20 @@ function ImportOld() {
 function Reminders() {
   const { books, raw, run, say, can, demo } = useData();
   const s = books.settings;
-  const cfg = reminderSettings(s);
+  const list = reminderRecipients(s);
   const state = (raw.settings || []).find((x) => x.id === 'reminderState');
-  const [emails, setEmails] = useState(((s.reminders && s.reminders.emails) || []).join(', '));
+  const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const save = (patch, text = 'Saved') => run({ ops: [{ col: 'settings', id: 'app', data: { ...s, id: 'app', handlers: books.handlers, ...patch } }] }, text);
-  const saveReminders = (patch) => save({ reminders: { ...(s.reminders || {}), emails: cfg.emails, rent: cfg.rent, questions: cfg.questions, ...patch } });
-  const saveEmails = () => {
-    const list = emails.split(/[,;\s]+/).map((e) => e.trim()).filter(Boolean);
-    const bad = list.filter((e) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
-    if (bad.length) return say(`This does not look like an email address: ${bad[0]}`, true);
-    return saveReminders({ emails: list });
+  const saveList = (next, text) => save({ reminders: { recipients: next } }, text);
+  const setOne = (i, patch) => saveList(list.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const add = () => {
+    const e = email.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return say(`This does not look like an email address: ${e || '(empty)'}`, true);
+    if (list.some((r) => r.email.toLowerCase() === e.toLowerCase())) return say('That address is already on the list.', true);
+    setEmail('');
+    return saveList([...list, blankRecipient(e)], 'Added. Choose below what this person receives.');
   };
   const test = async () => {
     setBusy(true); setResult(null);
@@ -539,32 +556,48 @@ function Reminders() {
       const text = await res.text();
       let body = {};
       try { body = JSON.parse(text); } catch (e) { /* not JSON */ }
-      if (res.status === 404) setResult({ error: 'The reminder function is not on the site yet. In Netlify, check that Functions lists "test-reminder" and redeploy.' });
-      else if (body.sent) setResult({ ok: `Sent to ${body.to.join(', ')}: “${body.subject}”. Check the inbox (and the spam folder the first time).` });
-      else setResult({ error: body.error || body.why || `The reminder function failed (${res.status}).` });
-    } catch (e) { setResult({ error: 'Could not reach the site. Check the connection.' }); }
+      if (res.status === 404) setResult({ error: ['The reminder function is not on the site yet. In Netlify, check that Functions lists "test-reminder" and redeploy.'] });
+      else if (body.error) setResult({ error: [body.error] });
+      else setResult({
+        ok: (body.sent || []).map((x) => `Sent to ${x.to}: “${x.subject}”`),
+        error: (body.failed || []).map((x) => `Not sent to ${x.to}: ${x.error}`),
+        note: [...(body.skipped || []).map((x) => `${x.email}: ${x.why}`), ...(body.why && !(body.sent || []).length ? [body.why] : [])],
+      });
+    } catch (e) { setResult({ error: ['Could not reach the site. Check the connection.'] }); }
     setBusy(false);
   };
   const unpaid = books.tenancies.filter((t) => t.isActive && t.unpaidMonths.length);
+  const open = books.notes.filter((n) => n.kind === 'todo' && !n.done);
   return (
     <>
-      <Card title="Email reminders">
-        <Field label="Send to these email addresses" hint="Separate several with commas."><Text value={emails} onChange={setEmails} placeholder="you@example.com, ragu@example.com" inputMode="email" /></Field>
-        <Btn kind="sec" onClick={saveEmails}>Save addresses</Btn>
-        <Check checked={cfg.rent.on} onChange={(v) => saveReminders({ rent: { ...cfg.rent, on: v } })}><strong>Rent not logged</strong><div className="v2-muted">Starts once the rent is due and keeps going until it is recorded in the app.</div></Check>
-        {cfg.rent.on && (
-          <label className="v2-row"><span>Remind again</span><span style={{ width: 170 }}><Select value={String(cfg.rent.everyDays)} onChange={(v) => saveReminders({ rent: { ...cfg.rent, everyDays: Number(v) } })} options={[['1', 'Every day'], ['2', 'Every 2 days'], ['3', 'Every 3 days'], ['7', 'Every week']]} /></span></label>
-        )}
-        <Check checked={cfg.questions.on} onChange={(v) => saveReminders({ questions: { on: v } })}><strong>Questions waiting for someone</strong><div className="v2-muted">Added to the rent email, or sent once a week on their own.</div></Check>
-        <Muted>Emails go out at 7:00 pm India time. Right now {unpaid.length ? `${unpaid.length} ${unpaid.length === 1 ? 'property has' : 'properties have'} rent not logged: ${unpaid.map((t) => t.propertyName).join(', ')}.` : 'no rent is unpaid, so nothing would be sent.'}</Muted>
-        {state && state.lastSentAt && <Muted>Last email: {fmtDate(String(state.lastSentAt).slice(0, 10))} to {state.lastTo} — “{state.lastSubject}”.</Muted>}
+      <Card title="Who gets reminder emails">
+        <Muted>Each person gets one email with everything for them. Add an address, then choose what that person receives.</Muted>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Text value={email} onChange={setEmail} placeholder="name@example.com" inputMode="email" aria-label="Email address to add" onKeyDown={(e) => { if (e.key === 'Enter') add(); }} />
+          <Btn kind="sec" onClick={add}>Add</Btn>
+        </div>
+        {list.length === 0 && <Muted>Nobody yet, so no emails are sent.</Muted>}
+      </Card>
+      {list.map((r, i) => (
+        <Card key={r.email} title={r.email} right={<button type="button" className="v2-link" aria-label={`Remove ${r.email}`} onClick={() => { if (window.confirm(`Stop sending reminders to ${r.email}?`)) saveList(list.filter((_, j) => j !== i), 'Removed'); }}>Remove</button>}>
+          <label className="v2-row"><span>This address belongs to</span><span style={{ width: 160 }}><Select aria-label={`Who ${r.email} is`} value={r.person} onChange={(v) => setOne(i, { person: v })} options={books.handlers} placeholder="Nobody in particular" /></span></label>
+          <Check checked={r.rent} onChange={(v) => setOne(i, { rent: v })}><strong>Rent not logged</strong><div className="v2-muted">From the day rent is due until it is recorded in the app.</div></Check>
+          <label className="v2-row"><span><strong>Action items</strong><div className="v2-muted">Notes and questions from Home → To do</div></span><span style={{ width: 190 }}><Select aria-label={`Action items for ${r.email}`} value={r.items} onChange={(v) => setOne(i, { items: v })} options={[['mine', r.person ? `For ${r.person}, and unassigned` : 'Unassigned ones only'], ['all', "Everyone's"], ['none', 'None']]} /></span></label>
+          <Check checked={r.attention} onChange={(v) => setOne(i, { attention: v })}><strong>Everything else that needs attention</strong><div className="v2-muted">Agents who have not paid, wages due, unpaid bills, leases ending.</div></Check>
+          <label className="v2-row"><span>How often, while there is something to say</span><span style={{ width: 160 }}><Select aria-label={`How often for ${r.email}`} value={String(r.everyDays)} onChange={(v) => setOne(i, { everyDays: Number(v) })} options={[['1', 'Every day'], ['2', 'Every 2 days'], ['3', 'Every 3 days'], ['7', 'Every week']]} /></span></label>
+          {state && state.sent && state.sent[r.email] && <Muted>Last emailed {fmtDate(state.sent[r.email])}.</Muted>}
+        </Card>
+      ))}
+      <Card>
+        <Muted>Emails go out at 7:00 pm India time. Right now: {unpaid.length ? `rent not logged for ${unpaid.map((t) => t.propertyName).join(', ')}` : 'no rent is unpaid'}; {open.length} open action {open.length === 1 ? 'item' : 'items'}{open.length ? ` (${books.handlers.map((h) => `${h}: ${open.filter((n) => n.assignee === h).length}`).join(', ')}, unassigned: ${open.filter((n) => !n.assignee).length})` : ''}. A person with nothing due gets no email.</Muted>
       </Card>
       {can.admin && (
         <Card title="Check that it works">
-          <Muted>Sends today's reminder straight away, even if one already went out. If something is not set up yet, this says exactly what is missing.</Muted>
+          <Muted>Sends today's emails straight away to everyone above who has something due, even if they were already emailed. If something is not set up yet, this says exactly what is missing.</Muted>
           <Btn kind="sec" disabled={busy} onClick={() => (demo ? say('Emails cannot be sent from sample data.', true) : test())}>{busy ? 'Sending…' : 'Send a test email now'}</Btn>
-          {result && result.ok && <div className="v2-tag g" style={{ whiteSpace: 'normal' }}>{result.ok}</div>}
-          {result && result.error && <div className="v2-tag r" style={{ whiteSpace: 'normal' }}>{result.error}</div>}
+          {result && (result.ok || []).map((t, k) => <div key={'o' + k} className="v2-tag g" style={{ whiteSpace: 'normal' }}>{t}</div>)}
+          {result && (result.error || []).map((t, k) => <div key={'e' + k} className="v2-tag r" style={{ whiteSpace: 'normal' }}>{t}</div>)}
+          {result && (result.note || []).map((t, k) => <Muted key={'n' + k}>{t}</Muted>)}
         </Card>
       )}
       <Card title="On the Home screen">

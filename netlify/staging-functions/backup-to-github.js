@@ -14,6 +14,8 @@
 //   GITHUB_BACKUP_BRANCH  optional, defaults to the repository's default branch
 //   REACT_APP_FIREBASE_PROJECT_ID  already set for the site build
 
+const { putBackup } = require('../lib/github');
+
 const json = (statusCode, body) => ({ statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
 function uidFromToken(token) {
@@ -25,15 +27,7 @@ function uidFromToken(token) {
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
-  const { GITHUB_BACKUP_TOKEN: ghToken, GITHUB_BACKUP_REPO: repo, REACT_APP_FIREBASE_PROJECT_ID: project } = process.env;
-  // no branch given = the repository's own default branch (main or master), which also works on an empty repository
-  const branch = process.env.GITHUB_BACKUP_BRANCH || '';
-  const cleanRepo = String(repo || '').trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/i, '').replace(/^\/+|\/+$/g, '');
-  if (!ghToken || !repo) {
-    const missing = [!ghToken && 'GITHUB_BACKUP_TOKEN', !repo && 'GITHUB_BACKUP_REPO'].filter(Boolean).join(' and ');
-    return json(501, { error: `${missing} ${missing.includes(" and ") ? "are" : "is"} not set on the Netlify site, or the site was not redeployed after adding it.` });
-  }
-  if (!/^[\w.-]+\/[\w.-]+$/.test(cleanRepo)) return json(500, { error: 'GITHUB_BACKUP_REPO must look like owner/name, for example babuhaldorai/family-office-backups.' });
+  const project = process.env.REACT_APP_FIREBASE_PROJECT_ID;
   if (!project) return json(500, { error: 'The Firebase project id is not set on the site.' });
 
   const auth = event.headers.authorization || event.headers.Authorization || '';
@@ -63,31 +57,6 @@ exports.handler = async (event) => {
   } catch (e) { return json(400, { error: 'That is not a backup.' }); }
 
   // backups/2026/11/fo-2026-11-13-183000.json — a new file every time, never overwritten
-  const [, y, m] = name.match(/-(\d{4})-(\d{2})-\d{2}-\d{6}\.json$/);
-  const path = `backups/${y}/${m}/${name}`;
-  const gh = (url, init = {}) => fetch(url, {
-    ...init,
-    headers: {
-      Authorization: 'Bearer ' + ghToken.trim(), Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'backup-function', 'Content-Type': 'application/json',
-    },
-  });
-  try {
-    const body = { message: `Backup ${name}`, content: Buffer.from(content, 'utf8').toString('base64') };
-    if (branch) body.branch = branch;
-    const res = await gh(`https://api.github.com/repos/${cleanRepo}/contents/${path}`, { method: 'PUT', body: JSON.stringify(body) });
-    if (res.ok) return json(200, { ok: true, path });
-    const detail = await res.json().catch(() => ({}));
-    // say what is actually wrong, in words that point at the fix
-    let why = `GitHub answered ${res.status}${detail.message ? ': ' + detail.message : ''}.`;
-    if (res.status === 401) why = 'GitHub did not accept the token. It may be mistyped or expired. Make a new one and update GITHUB_BACKUP_TOKEN.';
-    else if (res.status === 403) why = `The token is not allowed to write to ${cleanRepo}. A fine-grained token needs this repository selected and "Contents: Read and write".`;
-    else if (res.status === 404) {
-      const look = await gh(`https://api.github.com/repos/${cleanRepo}`).catch(() => null);
-      why = look && look.ok
-        ? `The token can see ${cleanRepo} but cannot write to it. Give it "Contents: Read and write"${branch ? `, and check the branch "${branch}" exists` : ''}.`
-        : `GitHub cannot find ${cleanRepo} with this token. Check the name in GITHUB_BACKUP_REPO, and that the token has this repository selected.`;
-    } else if (res.status === 409 || res.status === 422) why = `GitHub would not create the file (${detail.message || res.status}).${branch ? ` Check the branch "${branch}" exists.` : ''}`;
-    return json(502, { error: why });
-  } catch (e) { return json(502, { error: 'Could not reach GitHub.' }); }
+  try { return json(200, { ok: true, path: await putBackup(name, content) }); }
+  catch (e) { return json(e.status || 502, { error: e.message }); }
 };

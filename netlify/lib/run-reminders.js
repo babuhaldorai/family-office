@@ -1,7 +1,8 @@
-// Works out today's reminder and sends it. Shared by the daily scheduled job
-// and by the "send a test email" button.
-const { serviceAccount, accessToken, firestore } = require('./google');
-const { buildReminder } = require('../../src/v2/core/reminders');
+// Works out today's reminder emails and sends them. Shared by the daily
+// scheduled job and by the "send a test email" button.
+const { serviceAccount, accessToken, firestore, loadAll } = require('./google');
+const { buildReminders } = require('../../src/v2/core/reminders');
+const { COLLECTIONS } = require('../../src/v2/core/books');
 const { todayIST } = require('../../src/v2/core/util');
 
 async function sendEmail({ to, subject, text, html }) {
@@ -19,25 +20,27 @@ async function sendEmail({ to, subject, text, html }) {
   }
 }
 
-// force: send now even if a reminder already went out within the chosen number of days
-async function runReminders({ force = false, dryRun = false } = {}) {
+// force: send now even to people already emailed within their chosen number of days
+async function runReminders({ force = false } = {}) {
   const sa = serviceAccount();
   const project = sa.project || process.env.REACT_APP_FIREBASE_PROJECT_ID;
   if (!project) throw new Error('The Firebase project id is not set on the site.');
   const db = firestore(project, await accessToken(sa));
-  const [tenancies, people, properties, settings, notes, rent, advIn, advOut] = await Promise.all([
-    db.list('fo_tenancies'), db.list('fo_people'), db.list('fo_properties'), db.list('fo_settings'), db.list('fo_notes'),
-    db.where('fo_entries', 'kind', 'rent'), db.where('fo_entries', 'kind', 'tenant_advance'), db.where('fo_entries', 'kind', 'tenant_advance_return'),
-  ]);
-  const raw = { tenancies, people, properties, settings, notes, entries: [...rent, ...advIn, ...advOut] };
-  const state = settings.find((s) => s.id === 'reminderState') || {};
+  const raw = await loadAll(db, COLLECTIONS);
+  const state = raw.settings.find((s) => s.id === 'reminderState') || {};
   const today = todayIST();
-  const r = buildReminder(raw, today, force ? {} : state, process.env.URL || '');
-  if (r.skip) return { sent: false, why: r.skip };
-  if (dryRun) return { sent: false, why: 'Check only: an email would be sent.', to: r.to, subject: r.subject };
-  await sendEmail(r);
-  await db.set('fo_settings', 'reminderState', { ...state, ...r.state, id: 'reminderState', lastSentAt: new Date().toISOString(), lastSubject: r.subject, lastTo: r.to.join(', ') });
-  return { sent: true, to: r.to, subject: r.subject, counts: r.counts };
+  const r = buildReminders(raw, today, force ? {} : state, process.env.URL || '');
+  if (!r.emails.length) return { sent: [], skipped: r.skipped, why: r.note || 'Nobody has anything due today.' };
+  const sent = [];
+  const failed = [];
+  const reached = { ...(state.sent || {}) };
+  // one person's failure must not stop the others
+  for (const email of r.emails) {
+    try { await sendEmail(email); sent.push({ to: email.to[0], subject: email.subject }); reached[email.to[0]] = today; }
+    catch (e) { failed.push({ to: email.to[0], error: e.message }); }
+  }
+  if (sent.length) await db.set('fo_settings', 'reminderState', { id: 'reminderState', sent: reached, lastSentAt: new Date().toISOString(), lastSubject: sent[0].subject, lastTo: sent.map((s) => s.to).join(', ') });
+  return { sent, failed, skipped: r.skipped };
 }
 
 module.exports = { runReminders };

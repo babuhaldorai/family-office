@@ -74,6 +74,15 @@ export function agentForField(field, date) {
   return links.length ? links[0].agentId : '';
 }
 
+// Past harvests on a field that went to a different agent than the field's
+// dated list says. Only dates the list actually covers are judged.
+export function agentConflicts(fieldId, agentLinks, deliveries) {
+  const probe = { agentLinks };
+  return (deliveries || []).filter((d) => d.fieldId === fieldId && !d.deleted).map((d) => ({ d, usual: agentForField(probe, d.date) }))
+    .filter((x) => x.usual && x.usual !== x.d.agentId).map((x) => ({ id: x.d.id, date: x.d.date, agentId: x.d.agentId, usual: x.usual }))
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
 export const kgRateFor = (person) =>
   person && person.payBasis === 'day' ? 0 : num(person?.kgRate ?? DEFAULT_KG_RATE);
 

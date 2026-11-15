@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { applyUpdate } from '../serviceWorkerRegistration';
 import './v2.css';
 import { DataProvider, useData } from './data/DataContext';
@@ -22,9 +22,8 @@ const sectionOf = (path, books) => {
 };
 
 function Shell({ onLogout, onClassic }) {
-  const { books, meta, can, demo, raw, store, user, today, say } = useData();
+  const { books, meta, can, demo } = useData();
   const { path, query } = useRoute();
-  const tried = useRef(false);
   const [update, setUpdate] = useState(!!window.__swWaiting);
   const [online, setOnline] = useState(navigator.onLine);
   useEffect(() => {
@@ -33,27 +32,6 @@ function Shell({ onLogout, onClassic }) {
     window.addEventListener('v2-update', up); window.addEventListener('online', net); window.addEventListener('offline', net);
     return () => { window.removeEventListener('v2-update', up); window.removeEventListener('online', net); window.removeEventListener('offline', net); };
   }, []);
-
-  // Automatic backup: once per app opening, a little after the data has
-  // loaded, and only when something changed since the last backup.
-  useEffect(() => {
-    if (demo || tried.current || !meta.loaded || !can.write || !raw || !navigator.onLine) return undefined;
-    const t = setTimeout(async () => {
-      if (tried.current) return;
-      tried.current = true;
-      try {
-        const total = Object.values(raw).reduce((s, list) => s + list.length, 0);
-        if (!total) return;
-        const { needsBackup, runBackup } = await import('./data/backupService');
-        const marker = (raw.settings || []).find((s) => s.id === 'backup');
-        if (!needsBackup(raw, marker)) return;
-        const res = await runBackup(raw, { by: user?.email || 'unknown', today });
-        store.commit([{ col: 'settings', id: 'backup', data: res.marker }], { keepHistory: false, why: 'backup' });
-        if (res.marker.bucket !== 'ok' && res.marker.github !== 'ok') say('The automatic backup could not be stored. Open Settings → Backup.', true);
-      } catch (e) { /* shown in Settings → Backup as "Never" */ }
-    }, 15000);
-    return () => clearTimeout(t);
-  }, [demo, meta.loaded, can.write, raw, store, user, today, say]);
 
   if (!books || !meta.loaded) return <div className="v2 v2-center"><div className="v2-h">Family Office</div><div className="v2-muted">Loading…</div></div>;
 

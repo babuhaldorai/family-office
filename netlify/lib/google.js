@@ -17,7 +17,7 @@ function serviceAccount() {
 
 async function accessToken(sa) {
   const now = Math.floor(Date.now() / 1000);
-  const unsigned = `${b64({ alg: 'RS256', typ: 'JWT' })}.${b64({ iss: sa.email, scope: 'https://www.googleapis.com/auth/datastore', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 600 })}`;
+  const unsigned = `${b64({ alg: 'RS256', typ: 'JWT' })}.${b64({ iss: sa.email, scope: 'https://www.googleapis.com/auth/datastore https://www.googleapis.com/auth/devstorage.read_write', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 600 })}`;
   let signature;
   try { signature = crypto.createSign('RSA-SHA256').update(unsigned).sign(sa.key, 'base64url'); }
   catch (e) { throw new Error('The Firebase private key could not be used. Check FIREBASE_PRIVATE_KEY was pasted complete, including the BEGIN and END lines.'); }
@@ -86,4 +86,18 @@ function firestore(project, token) {
   };
 }
 
-module.exports = { serviceAccount, accessToken, firestore, decodeFields, encode };
+// Every collection of the new app, as plain records
+async function loadAll(db, collections) {
+  const lists = await Promise.all(collections.map((c) => db.list('fo_' + c)));
+  return Object.fromEntries(collections.map((c, i) => [c, lists[i]]));
+}
+
+// Puts one file in the Firebase storage bucket (never overwrites: the name carries the time)
+async function uploadToBucket(token, bucket, name, text) {
+  const res = await fetch(`https://storage.googleapis.com/upload/storage/v1/b/${encodeURIComponent(bucket)}/o?uploadType=media&ifGenerationMatch=0&name=${encodeURIComponent(name)}`, {
+    method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: text,
+  });
+  if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(`The storage bucket refused the file (${res.status}${j.error && j.error.message ? ': ' + j.error.message : ''}).`); }
+}
+
+module.exports = { serviceAccount, accessToken, firestore, decodeFields, encode, loadAll, uploadToBucket };

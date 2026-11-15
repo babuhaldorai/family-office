@@ -21,11 +21,11 @@ if (process.env.REACT_APP_FIREBASE_PROJECT_ID !== expectedProject) {
   process.exit(1);
 }
 
-if (
-  process.env.REACT_APP_FIREBASE_AUTH_DOMAIN !==
-  "manage-my-tea.firebaseapp.com"
-) {
-  console.error("BLOCKED: Unexpected Firebase authentication domain.");
+// The sign-in domain may be the Firebase one or this site's own address (the
+// site passes /__/auth/ through to Firebase, which is what phones need).
+const authDomain = process.env.REACT_APP_FIREBASE_AUTH_DOMAIN;
+if (/^https?:|\//.test(authDomain)) {
+  console.error("BLOCKED: REACT_APP_FIREBASE_AUTH_DOMAIN must be a bare host name, like my-site.netlify.app.");
   process.exit(1);
 }
 

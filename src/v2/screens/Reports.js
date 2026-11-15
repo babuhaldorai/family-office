@@ -1,14 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useData } from '../data/DataContext';
-import { Page, Card, Row, Tag, Money, Tabs, Table, Select, Muted, Chips, BarRow, Text, go, href, download } from '../ui/kit';
+import { Page, Card, Row, Tag, Money, Tabs, Table, Select, Muted, Chips, BarRow, Text, Btn, go, href, download } from '../ui/kit';
 import { usePeriod, PeriodPicker } from '../ui/Period';
 import { inr, inRange, sum, fmtDate, fmtMonth, r2 } from '../core/util';
 import { MODE_LABEL, DIFF_LABEL } from '../core/books';
 import { doBetter, spendingGrowth, forecastNextMonth } from '../core/insights';
 import { entriesCSV } from '../core/backup';
 import { useDelete } from '../data/useDelete';
+import { nextHarvests, manureNeeds, pendingWork, summaryForAI } from '../core/planner';
 
-const TABS = [['summary', 'Summary'], ['better', 'Do better'], ['fields', 'Fields'], ['agents', 'Agents'], ['workers', 'Workers'], ['rentals', 'Rentals'], ['entries', 'Every entry']];
+const TABS = [['summary', 'Summary'], ['plan', 'Plan ahead'], ['better', 'Do better'], ['fields', 'Fields'], ['agents', 'Agents'], ['workers', 'Workers'], ['rentals', 'Rentals'], ['entries', 'Every entry']];
 const BIZ = [['all', 'All'], ['tea', 'Tea'], ['rental', 'Rentals'], ['home', 'Homes']];
 
 function useWide() {
@@ -29,7 +30,8 @@ export default function Reports({ tab = 'summary', query }) {
   return (
     <Page title="Reports">
       <Tabs tabs={TABS} value={tab} onChange={(t) => go('/reports/' + t)} />
-      {tab !== 'better' && <PeriodPicker state={ps} />}
+      {tab !== 'better' && tab !== 'plan' && <PeriodPicker state={ps} />}
+      {tab === 'plan' && <Plan />}
       {tab === 'summary' && <Summary period={ps.period} />}
       {tab === 'better' && <Better />}
       {tab === 'fields' && <FieldsTab period={ps.period} />}
@@ -138,7 +140,7 @@ function Summary({ period }) {
 }
 
 function Better() {
-  const { books } = useData();
+  const { books, say } = useData();
   const [area, setArea] = useState('all');
   const tips = useMemo(() => doBetter(books), [books]);
   const shown = tips.filter((t) => area === 'all' || t.area === area || t.area === 'all');
@@ -147,6 +149,10 @@ function Better() {
     <>
       <Chips small label="Area" options={BIZ.filter(([k]) => k !== 'home')} value={area} onChange={setArea} />
       <Muted>Worked out from your own entries, sorted by how much each could be worth in a year. The rupee figures are rough estimates.</Muted>
+      <Card title="A second opinion from an AI, free">
+        <Muted>This copies a summary of your figures (fields, agents, costs, rentals, what the app flags) with a set of questions. Paste it into any AI assistant you already use. Names of workers, tenants and agents are left out. Nothing is sent anywhere by the app.</Muted>
+        <Btn kind="sec" onClick={async () => { const text = summaryForAI(books); try { await navigator.clipboard.writeText(text); say('Copied. Paste it into an AI assistant.'); } catch (e) { download('summary-for-ai.txt', text, 'text/plain;charset=utf-8'); say('Saved as a file instead (copying was not allowed).'); } }}>Copy the summary and questions</Btn>
+      </Card>
       {shown.length === 0 && <Card><Muted>Nothing stands out yet. These suggestions need a few months of harvests, payments and expenses to compare.</Muted></Card>}
       {shown.map((t, i) => (
         <Card key={i}>
@@ -156,6 +162,54 @@ function Better() {
           {link(t) && <a href={link(t)}>See what this is based on</a>}
         </Card>
       ))}
+    </>
+  );
+}
+
+function Plan() {
+  const { books } = useData();
+  const pending = useMemo(() => pendingWork(books), [books]);
+  const harvests = useMemo(() => nextHarvests(books), [books]);
+  const manure = useMemo(() => manureNeeds(books), [books]);
+  const forecast = useMemo(() => forecastNextMonth(books), [books]);
+  return (
+    <>
+      <Muted>Worked out from your own past entries. These are typical figures, not promises; they get steadier as more is logged.</Muted>
+      <Card title="What is pending now">
+        {pending.length === 0 && <Muted>Nothing is waiting.</Muted>}
+        {pending.map((p, i) => <Row key={i} top left={<strong>{p.what}</strong>} sub={p.detail} right={p.amount != null ? <Money v={p.amount} /> : null} />)}
+      </Card>
+      <Card title="Where the next harvest should be">
+        {harvests.map((h) => (h.leased ? <Row key={h.fieldId} left={h.name} right={<Tag kind="n">Leased to {h.leased}</Tag>} />
+          : h.tooFew != null ? <Row key={h.fieldId} top left={h.name} sub={`Only ${h.tooFew} harvest ${h.tooFew === 1 ? 'day' : 'days'} logged. At least 3 are needed to estimate.`} right={<Tag kind="n">Not enough yet</Tag>} />
+            : (
+              <Row key={h.fieldId} top to={href('/field/' + h.fieldId)}
+                left={<strong>{h.name}</strong>}
+                sub={`Last harvested ${fmtDate(h.last)} (${h.waited} days ago). Usually every ${h.gap} days. Expect ${h.kgLow}–${h.kgHigh} kg${h.workers ? `, about ${h.workers} ${h.workers === 1 ? 'picker' : 'pickers'} at ${h.perPicker} kg each` : ''}.`}
+                right={<Tag kind={h.overdueBy >= 0 ? '' : 'g'}>{h.overdueBy > 0 ? `Due ${h.overdueBy} days ago` : h.overdueBy === 0 ? 'Due today' : `In ${-h.overdueBy} days`}</Tag>} />
+            )))}
+        {harvests.length === 0 && <Muted>No fields yet.</Muted>}
+        <Muted>The usual gap and kg come from the last 8 rounds on each field. If a field has waited longer than usual, a little more leaf is expected.</Muted>
+      </Card>
+      {forecast && (
+        <Card title={`${fmtMonth(forecast.month)}, all fields`}>
+          <Row top left="Expected harvest" sub={`From ${forecast.basis}`} right={<strong>{forecast.kgLow.toLocaleString('en-IN')} – {forecast.kgHigh.toLocaleString('en-IN')} kg</strong>} />
+        </Card>
+      )}
+      <Card title="Manure to have ready">
+        {manure.rows.map((r) => (
+          <Row key={r.fieldId} top to={href('/field/' + r.fieldId)} left={<strong>{r.name}</strong>}
+            sub={`${r.last ? 'Last manured ' + fmtDate(r.last) : 'No manuring logged'}${r.bags ? `. Usually ${r.bags} bags${r.perAcre ? ` (${r.perAcre} per acre)` : ''}` : ''}${r.types.length ? '. Used before: ' + r.types.map((t) => `${t.name}${t.avgChange != null ? ` (yield ${t.avgChange > 0 ? '+' : ''}${t.avgChange}% after)` : ''}`).join(', ') : ''}`}
+            right={<Tag kind={r.status === 'ok' ? 'g' : r.status === 'now' || r.status === 'soon' ? '' : 'n'}>{r.tag}</Tag>} />
+        ))}
+        <Row left="Bags needed for fields due now or soon" right={<strong>{manure.need}</strong>} />
+        <Row left="Bags in stock" right={manure.inStock} />
+        <Row left={<strong>To buy</strong>} right={<strong>{manure.toBuy} bags{manure.cost ? ` · about ${inr(manure.cost)}` : ''}</strong>} />
+        {manure.cost != null && <Muted>Cost uses the price of your last purchase ({inr(manure.lastPrice)} a bag with transport).</Muted>}
+      </Card>
+      <Card title="Which type of manure, and why">
+        <Muted>The app can show what you used before and how the yield moved afterwards (above), but it cannot tell you which fertilizer the soil needs: that depends on a soil test (pH and nutrient levels), the age of the bushes and when they were last pruned. A soil test through the Tea Board or UPASI advisory service, or a local agricultural office, costs little and gives a specific recommendation. The “Do better” tab has a button to take your figures to an AI assistant for a general second opinion.</Muted>
+      </Card>
     </>
   );
 }
