@@ -7,7 +7,7 @@ const routes = ['/', '/harvest', '/harvest/d5', '/pay', '/pay?type=worker&party=
 (async () => {
   const browser = await chromium.launch();
   let bad = 0;
-  for (const [name, vp] of [['phone', { width: 390, height: 844 }], ['desk', { width: 1360, height: 900 }]]) {
+  for (const [name, vp] of [['phone', { width: 390, height: 844 }], ['small', { width: 360, height: 740 }], ['desk', { width: 1360, height: 900 }]]) {
     const page = await browser.newPage({ viewport: vp });
     const errs = [];
     page.on('pageerror', (e) => errs.push('PAGEERROR ' + e.message));

@@ -25,7 +25,7 @@ export function PeriodPicker({ state, presets }) {
   const opts = presets ? PRESETS.filter(([k]) => presets.includes(k)) : PRESETS;
   return (
     <div className="v2-stack" style={{ gap: 8 }}>
-      <Chips small label="Period" options={opts} value={preset} onChange={setPreset} />
+      <Chips small scroll label="Period" options={opts} value={preset} onChange={setPreset} />
       {preset === 'custom' ? (
         <div className="v2-cols">
           <DateField label="From" value={custom.from} onChange={(v) => setCustom((c) => ({ ...c, from: v }))} />

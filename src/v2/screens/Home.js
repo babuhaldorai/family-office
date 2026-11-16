@@ -103,9 +103,9 @@ export default function Home() {
       {can.money && !empty && (
         <Card title={'This month · ' + periodFor('month', today).label} right={<a href={href('/reports')}>Reports</a>}>
           <div className="v2-grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
-            <div><Muted>Money in</Muted><div className="v2-big v2-num">{inr(month.cashIn)}</div></div>
-            <div><Muted>Money out</Muted><div className="v2-big v2-num">{inr(month.cashOut)}</div></div>
-            <div><Muted>Left</Muted><div className={'v2-big v2-num ' + (month.cashNet >= 0 ? 'v2-green' : 'v2-red')}>{inr(month.cashNet)}</div></div>
+            <div><Muted>Money in</Muted><div className="v2-big v2-num">{inr(Math.round(month.cashIn))}</div></div>
+            <div><Muted>Money out</Muted><div className="v2-big v2-num">{inr(Math.round(month.cashOut))}</div></div>
+            <div><Muted>Left</Muted><div className={'v2-big v2-num ' + (month.cashNet >= 0 ? 'v2-green' : 'v2-red')}>{inr(Math.round(month.cashNet))}</div></div>
           </div>
         </Card>
       )}

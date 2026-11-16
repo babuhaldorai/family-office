@@ -102,7 +102,7 @@ export const DateField = ({ label = 'Date', value, onChange, style, ...rest }) =
     <input className="v2-inp" type="date" value={value || ''} onChange={(e) => onChange(e.target.value)} {...rest} />
   </Field>
 );
-export function Chips({ options, value, onChange, label, small, multi }) {
+export function Chips({ options, value, onChange, label, small, multi, scroll }) {
   const isOn = (v) => (multi ? (value || []).includes(v) : value === v);
   const toggle = (v) => {
     if (!multi) return onChange(v);
@@ -110,7 +110,7 @@ export function Chips({ options, value, onChange, label, small, multi }) {
     return onChange(cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]);
   };
   return (
-    <div className="v2-chips" role="group" aria-label={label}>
+    <div className={'v2-chips' + (scroll ? ' scroll' : '')} role="group" aria-label={label}>
       {options.map((o) => { const [v, l] = Array.isArray(o) ? o : [o, o]; return (
         <button key={v} type="button" className={'v2-chip' + (small ? ' sm' : '') + (isOn(v) ? ' on' : '')} aria-pressed={isOn(v)} onClick={() => toggle(v)}>{l}</button>
       ); })}
@@ -160,8 +160,41 @@ export function Ask({ value, onChange, handlers, suggestion = '' }) {
 export const askOp = (ask, { link, about, by, date, id }) => (ask && ask.who && ask.text.trim()
   ? [{ col: 'notes', id, data: { kind: 'todo', text: ask.text.trim(), about, assignee: ask.who, link, date, by, done: false } }] : []);
 
+export function useWide() {
+  const [wide, setWide] = useState(() => window.matchMedia('(min-width: 900px)').matches);
+  useEffect(() => {
+    const m = window.matchMedia('(min-width: 900px)');
+    const on = () => setWide(m.matches);
+    if (m.addEventListener) m.addEventListener('change', on); else m.addListener(on);
+    return () => { if (m.removeEventListener) m.removeEventListener('change', on); else m.removeListener(on); };
+  }, []);
+  return wide;
+}
+
+// A table on a computer. On a phone each row becomes its own block with the
+// column names written beside the values, so nothing has to be scrolled sideways.
 export function Table({ head, rows, foot, onRow, onDelete, empty = 'Nothing here yet.' }) {
+  const wide = useWide();
   if (!rows.length) return <Empty>{empty}</Empty>;
+  const label = (h) => (h && typeof h === 'object' ? h.label : h);
+  if (!wide) {
+    const block = (cells, key, r) => {
+      const pairs = cells.map((c, j) => [label(head[j]), c]).slice(1).filter(([, c]) => c !== '' && c !== null && c !== undefined && c !== false);
+      const body = (
+        <>
+          <div className="v2-stk-title">{cells[0]}</div>
+          <div className="v2-stk-grid">{pairs.map(([l, c], k) => <React.Fragment key={k}><span className="v2-stk-l">{l}</span><span className="v2-stk-v">{c}</span></React.Fragment>)}</div>
+        </>
+      );
+      return (
+        <div key={key} className={'v2-stk' + (r ? '' : ' tot')}>
+          {r && onRow ? <button type="button" className="v2-stk-main" onClick={() => onRow(r)}>{body}</button> : <div className="v2-stk-main">{body}</div>}
+          {r && onDelete && !r.noDelete && <DelBtn onClick={() => onDelete(r)} label={r.deleteLabel || 'Delete this row'} />}
+        </div>
+      );
+    };
+    return <div>{rows.map((r, i) => block(r.cells, r.key ?? i, r))}{foot && block(foot, 'foot', null)}</div>;
+  }
   return (
     <div className="v2-tw">
       <table className="v2-table">

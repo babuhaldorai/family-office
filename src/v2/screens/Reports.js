@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useData } from '../data/DataContext';
-import { Page, Card, Row, Tag, Money, Tabs, Table, Select, Muted, Chips, BarRow, Text, Btn, go, href, download } from '../ui/kit';
+import { Page, Card, Row, Tag, Money, Tabs, Table, Select, Muted, Chips, BarRow, Text, Btn, useWide, go, href, download } from '../ui/kit';
 import { usePeriod, PeriodPicker } from '../ui/Period';
 import { inr, inRange, sum, fmtDate, fmtMonth, r2 } from '../core/util';
 import { MODE_LABEL, DIFF_LABEL } from '../core/books';
@@ -13,17 +13,6 @@ import { uid as newId } from '../core/util';
 
 const TABS = [['summary', 'Summary'], ['plan', 'Plan ahead'], ['better', 'Do better'], ['fields', 'Fields'], ['agents', 'Agents'], ['workers', 'Workers'], ['rentals', 'Rentals'], ['entries', 'Every entry']];
 const BIZ = [['all', 'All'], ['tea', 'Tea'], ['rental', 'Rentals'], ['home', 'Homes']];
-
-function useWide() {
-  const [wide, setWide] = useState(() => window.matchMedia('(min-width: 900px)').matches);
-  useEffect(() => {
-    const m = window.matchMedia('(min-width: 900px)');
-    const on = () => setWide(m.matches);
-    m.addEventListener('change', on);
-    return () => m.removeEventListener('change', on);
-  }, []);
-  return wide;
-}
 
 export default function Reports({ tab = 'summary', query }) {
   const { can, today } = useData();
@@ -68,12 +57,12 @@ function Summary({ period }) {
   const entriesLink = (extra) => href('/reports/entries', extra);
   return (
     <>
-      <Chips small label="Business" options={BIZ} value={biz} onChange={setBiz} />
+      <Chips small scroll label="Business" options={BIZ} value={biz} onChange={setBiz} />
       <div className="v2-grid">
-        <Card><Muted>Money in</Muted><div className="v2-big v2-num">{inr(p.cashIn)}</div></Card>
-        <Card><Muted>Money out</Muted><div className="v2-big v2-num">{inr(p.cashOut)}</div></Card>
-        <Card><Muted>Left (cash)</Muted><div className={'v2-big v2-num ' + (p.cashNet >= 0 ? 'v2-green' : 'v2-red')}>{inr(p.cashNet)}</div></Card>
-        <Card><Muted>Profit</Muted><div className={'v2-big v2-num ' + (p.profit >= 0 ? 'v2-green' : 'v2-red')}>{inr(p.profit)}</div></Card>
+        <Card><Muted>Money in</Muted><div className="v2-big v2-num">{inr(Math.round(p.cashIn))}</div></Card>
+        <Card><Muted>Money out</Muted><div className="v2-big v2-num">{inr(Math.round(p.cashOut))}</div></Card>
+        <Card><Muted>Left (cash)</Muted><div className={'v2-big v2-num ' + (p.cashNet >= 0 ? 'v2-green' : 'v2-red')}>{inr(Math.round(p.cashNet))}</div></Card>
+        <Card><Muted>Profit</Muted><div className={'v2-big v2-num ' + (p.profit >= 0 ? 'v2-green' : 'v2-red')}>{inr(Math.round(p.profit))}</div></Card>
       </div>
       <div className="v2-two">
         <Card title="Profit · tap a line to see its entries">
@@ -382,7 +371,7 @@ function Entries({ period, query }) {
   return (
     <>
       <Text value={q} onChange={setQ} type="search" placeholder="Search a name, amount or comment" aria-label="Search" />
-      <Chips small label="Show" options={[['all', 'Everything'], ['money', 'Payments'], ['harvest', 'Harvests'], ['in', 'Money in'], ['out', 'Money out'], ['diff', 'With a difference']]} value={show} onChange={setShow} />
+      <Chips small scroll label="Show" options={[['all', 'Everything'], ['money', 'Payments'], ['harvest', 'Harvests'], ['in', 'Money in'], ['out', 'Money out'], ['diff', 'With a difference']]} value={show} onChange={setShow} />
       <div className="v2-cols">
         <Select aria-label="Business" value={biz} onChange={setBiz} options={BIZ} />
         <Select aria-label="With" value={partyName} onChange={setParty} options={parties} placeholder="Anyone" />

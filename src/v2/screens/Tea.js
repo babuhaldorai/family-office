@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useData } from '../data/DataContext';
-import { Page, Card, Row, Tag, Money, Tabs, Table, Select, Muted, Btn, Field, Text, Num, DateField, PayHow, Check, go, href, download, useForm } from '../ui/kit';
+import { Page, Card, Row, Tag, Money, Tabs, Table, Select, Muted, Btn, Field, Text, Num, DateField, PayHow, Check, useWide, go, href, download, useForm } from '../ui/kit';
 import { usePeriod, PeriodPicker } from '../ui/Period';
 import { inr, inRange, sum, fmtDate, num, r2, daysBetween } from '../core/util';
 import { DIFF_LABEL } from '../core/books';
@@ -29,6 +29,7 @@ export default function Tea({ tab = 'harvest' }) {
 function HarvestLog() {
   const { books, today, can } = useData();
   const del = useDelete();
+  const wide = useWide();
   const ps = usePeriod(today, 'month');
   const [fieldId, setField] = useState('');
   const [agentId, setAgent] = useState('');
@@ -48,6 +49,7 @@ function HarvestLog() {
         <Select aria-label="Worker" value={workerId} onChange={setWorker} options={books.workers.map((w) => [w.id, w.name])} placeholder="All workers" />
       </div>
       <Card title="Harvest log · tap a row to edit it" right={rows.length > 0 && <button type="button" className="v2-link" onClick={() => download(`harvest-${ps.period.from}-to-${ps.period.to}.csv`, deliveriesCSV(books, rows))}>Download</button>}>
+        {wide && (
         <Table
           head={head} empty="No harvest in this period."
           onRow={can.harvest ? (r) => go('/harvest/' + r.key) : undefined}
@@ -64,6 +66,20 @@ function HarvestLog() {
             ? ['Total', `${rows.length} days`, '', sum(rows, (d) => d.gross).toFixed(1), sum(rows, (d) => d.ded).toFixed(1), sum(rows, (d) => d.net).toFixed(1), '', inr(sum(rated, (d) => d.value)), inr(sum(rows, (d) => d.wages)), '']
             : ['Total', `${rows.length} days`, '', sum(rows, (d) => d.gross).toFixed(1), sum(rows, (d) => d.ded).toFixed(1), sum(rows, (d) => d.net).toFixed(1), '']}
         />
+        )}
+        {!wide && rows.length === 0 && <Muted>No harvest in this period.</Muted>}
+        {!wide && rows.map((d) => (
+          <Row key={d.id} top onClick={can.harvest ? () => go('/harvest/' + d.id) : undefined} onDelete={can.harvest ? () => del.delivery(d.id) : undefined} deleteLabel="Delete this harvest"
+            left={<><strong>{fmtDate(d.date, { year: false, dow: true })}</strong> · {d.fieldName} · {d.agentName}</>}
+            sub={<>{d.gross.toFixed(1)} − {d.ded.toFixed(1)} = <strong style={{ color: 'var(--ink)' }}>{d.net.toFixed(1)} kg</strong>{can.money ? <> · wages {inr(d.wages)}{d.value != null ? <> · ₹{d.rate.toFixed(2)} = {inr(d.value)}</> : null}</> : <> · {d.workers.map((w) => books.nameOf(w.workerId)).join(', ')}</>}</>}
+            right={can.money ? <Tag kind={STATUS[d.agentStatus][0]}>{STATUS[d.agentStatus][1]}</Tag> : null} />
+        ))}
+        {!wide && rows.length > 0 && (
+          <div className="v2-row" style={{ borderTop: '2px solid var(--input)' }}>
+            <strong>{rows.length} {rows.length === 1 ? 'day' : 'days'} · {sum(rows, (d) => d.net).toFixed(1)} kg net</strong>
+            {can.money && <strong>wages {inr(sum(rows, (d) => d.wages))}{rated.length ? ` · agents ${inr(sum(rated, (d) => d.value))}` : ''}</strong>}
+          </div>
+        )}
         {can.money && unratedKg > 0 && <Muted>{unratedKg.toFixed(1)} kg is waiting for a rate, so it is not in the money total yet.</Muted>}
       </Card>
     </>

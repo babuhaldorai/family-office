@@ -181,3 +181,42 @@
 .v2-ded3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 
 .v2-toast { bottom: 150px; }
+
+/* ── Phones ─────────────────────────────────────────────────────────────── */
+.v2 button, .v2 a, .v2 select, .v2 input, .v2 label { -webkit-tap-highlight-color: rgba(31, 107, 69, 0.15); touch-action: manipulation; }
+.v2-stk { display: flex; align-items: flex-start; gap: 4px; padding: 10px 0; border-top: 1px solid var(--line2); }
+.v2-stk:first-child { border-top: 0; padding-top: 2px; }
+.v2-stk.tot { border-top: 2px solid var(--input); font-weight: 600; }
+.v2 .v2-stk-main { flex: 1; min-width: 0; background: none; border: 0; padding: 0; text-align: left; color: var(--ink); font: inherit; display: block; }
+.v2-stk-title { font-weight: 600; margin-bottom: 4px; }
+.v2-stk-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; font-size: 14px; }
+.v2-stk-l { color: var(--muted); }
+.v2-stk-v { text-align: right; font-variant-numeric: tabular-nums; }
+.v2-stk.tot .v2-stk-l { color: var(--ink); }
+@media (max-width: 899px) {
+  /* iPhones zoom the page when a box with small text is tapped; 16px stops that */
+  .v2 input, .v2 select, .v2 textarea, .v2 .v2-inp { font-size: 16px; }
+  .v2 .v2-inp.big { font-size: 20px; }
+  .v2-chips.scroll { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; margin: 0 -16px; padding: 0 16px 2px; }
+  .v2-chips.scroll::-webkit-scrollbar { display: none; }
+  .v2-chips.scroll .v2-chip { flex: none; }
+  .v2-tabs { margin: 0 -16px; padding: 0 8px; scrollbar-width: none; }
+  .v2-tabs::-webkit-scrollbar { display: none; }
+  .v2-h { font-size: 22px; }
+  .v2 .v2-top { padding: 14px 0 8px; }
+  .v2 .v2-link { min-height: 40px; }
+  .v2-cols > * { flex: 1 1 120px; }
+  .v2-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .v2-colchart .pair i { width: 7px; }
+  .v2-nav a { font-size: 12.5px; }
+  /* room for the iPhone home bar, and keep the menu above the keyboard-free area */
+  .v2-nav { padding-bottom: max(env(safe-area-inset-bottom), 4px); }
+  .v2-main { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+}
+@media (max-width: 380px) {
+  .v2 .v2-page { padding: 0 12px 24px; }
+  .v2-chips.scroll, .v2-tabs { margin: 0 -12px; }
+  .v2-chips.scroll { padding: 0 12px 2px; }
+  .v2-ded3 { gap: 6px; }
+  .v2-bags { grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); }
+}

@@ -46,7 +46,7 @@ const assert = (c, m) => { if (!c) { throw new Error('ASSERT: ' + m); } console.
   assert(!/Agent B has not paid yet/.test(t), 'Home no longer lists Agent B');
   await nav('/tea');
   t = await text();
-  assert(/Tue 10 Nov\s+Road field\s+Agent B[\s\S]*?23\.00/.test(t), 'delivery of 10 Nov now carries rate 23.00');
+  assert(/Tue 10 Nov · Road field · Agent B[\s\S]{0,120}₹23\.00 = ₹2,806/.test(t), 'delivery of 10 Nov now carries rate 23.00 and an amount');
 
   // 3. paying a different amount demands a reason
   await nav('/reports/entries');
