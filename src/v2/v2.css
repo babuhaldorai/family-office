@@ -220,3 +220,8 @@
   .v2-ded3 { gap: 6px; }
   .v2-bags { grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); }
 }
+
+/* Keep clear of the phone's own status bar (time, signal, battery), the notch
+   and the rounded corners, when the app is opened from the home screen. */
+.v2 { box-sizing: border-box; padding-top: env(safe-area-inset-top); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+.v2-center { padding-top: calc(24px + env(safe-area-inset-top)); }
