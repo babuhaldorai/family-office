@@ -24,7 +24,8 @@ export function useDelete() {
     bill(col, id, label) {
       const res = removeWithPayments(col, id, books);
       if (res.error) { run(res); return; }
-      if (window.confirm(`Delete ${label}?${res.alsoRemoved ? `\n\nThe ${res.alsoRemoved === 1 ? 'payment' : res.alsoRemoved + ' payments'} recorded for it will be deleted too.` : ''}`)) run(res, done);
+      const grp = res.groupSize > 1 ? `\n\nIt was entered together with ${res.groupSize - 1} other ${col === 'stock' ? 'line' : 'field'}${res.groupSize > 2 ? 's' : ''}; ${res.groupSize > 2 ? 'they are' : 'it is'} deleted too.` : '';
+      if (window.confirm(`Delete ${label}?${grp}${res.alsoRemoved ? `\n\nThe ${res.alsoRemoved === 1 ? 'payment' : res.alsoRemoved + ' payments'} recorded for it will be deleted too.` : ''}`)) run(res, done);
     },
   };
 }

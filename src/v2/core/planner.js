@@ -121,3 +121,99 @@ export function summaryForAI(books) {
     '5. Which of my recent decisions look questionable from these numbers?');
   return L.join('\n');
 }
+
+// How many bags of each type to buy for the fields due for manuring.
+//   bags for a field = its usual bags per acre (its own last applications, or
+//   the average of the other fields) × acres, adjusted for how much the field
+//   yields compared with the others (more leaf taken off, more to put back),
+//   within ±20%. Split by type using the mix last applied to that field.
+export function manureBuyPlan(books) {
+  const today = books.today;
+  const fields = books.fields.filter((f) => !books.activeLeaseOn(f.id, today));
+  const year = { from: addDays(today, -364), to: today };
+  const rows = books.byField(year);
+  const kpa = (id) => rows.find((r) => r.fieldId === id)?.kgPerAcre || null;
+  const yields = fields.map((f) => kpa(f.id)).filter((x) => x);
+  const avgYield = yields.length ? yields.reduce((t, x) => t + x, 0) / yields.length : null;
+  const apps = (fid) => books.work.filter((w) => w.fieldId === fid && w.type === 'manure' && !w.byLessee && w.bagsApplied > 0);
+  const perAcre = (f) => { const a = num(f.acres); const ws = apps(f.id).slice(-3); return a > 0 && ws.length ? median(ws.map((w) => w.bagsApplied / a)) : null; };
+  const allRates = fields.map(perAcre).filter((x) => x);
+  const fallbackRate = allRates.length ? median(allRates) : null;
+  const compOfWork = (w) => {
+    const out = {};
+    w.items.forEach((it) => {
+      const comp = it.stockId ? books.compositionOf(it.stockId) : { [it.name || 'Manure']: 1 };
+      Object.entries(comp).forEach(([k, v]) => { out[k] = (out[k] || 0) + v * it.qty; });
+    });
+    const t = Object.values(out).reduce((a, b) => a + b, 0) || 1;
+    return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v / t]));
+  };
+  const lastAny = books.work.filter((w) => w.type === 'manure' && !w.byLessee && w.items.length).slice(-1)[0];
+  const due = [];
+  fields.forEach((f) => {
+    const item = fieldPlan(books, f.id).items.find((i) => i.type === 'manure');
+    if (item.status !== 'now' && item.status !== 'soon' && item.status !== 'unknown') return;
+    const rate = perAcre(f) || fallbackRate;
+    const acres = num(f.acres);
+    if (!rate || !acres) { due.push({ fieldId: f.id, name: f.name, tag: item.tag, bags: null, why: !acres ? 'Field size not set' : 'No manuring logged yet to go by' }); return; }
+    const adj = avgYield && kpa(f.id) ? Math.min(1.2, Math.max(0.8, kpa(f.id) / avgYield)) : 1;
+    const bags = Math.ceil(rate * acres * adj);
+    const last = apps(f.id).slice(-1)[0] || lastAny;
+    due.push({
+      fieldId: f.id, name: f.name, tag: item.tag, bags, rate: r2(rate), own: !!perAcre(f), adj: r2(adj),
+      comp: last ? compOfWork(last) : {}, compFrom: last ? (last.fieldId === f.id ? 'its last manuring' : `the last manuring on ${last.fieldName}`) : null,
+    });
+  });
+  // by type: needed, in stock (bought and not yet mixed or applied, plus what is in mixes still in bags)
+  const byType = new Map();
+  const add = (name, key, v) => { if (!byType.has(name)) byType.set(name, { name, need: 0, have: 0, price: null }); byType.get(name)[key] = r2(byType.get(name)[key] + v); };
+  due.forEach((d) => { if (d.bags) Object.entries(d.comp).forEach(([k, v]) => add(k, 'need', d.bags * v)); });
+  books.stock.filter((st) => st.left > 0).forEach((st) => Object.entries(books.compositionOf(st.id)).forEach(([k, v]) => add(k, 'have', st.left * v)));
+  books.stock.filter((st) => st.kind !== 'mix').slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')).forEach((st) => { const t = byType.get(st.name); if (t && t.price == null) t.price = st.unitCost; });
+  const types = [...byType.values()].filter((t) => t.need > 0).map((t) => ({ ...t, need: Math.ceil(t.need), toBuy: Math.max(0, Math.ceil(t.need - t.have)) }))
+    .map((t) => ({ ...t, cost: t.price != null ? Math.round(t.toBuy * t.price) : null }));
+  return { due, types, unsplit: sum(due.filter((d) => d.bags && !Object.keys(d.comp).length), (d) => d.bags), total: sum(due, (d) => d.bags || 0), cost: sum(types, (t) => t.cost || 0) };
+}
+
+// One idea a day for the Home screen. Rotates through what the books show,
+// so it changes daily without repeating until the list runs out.
+export function ideasForHome(books) {
+  const out = doBetter(books).map((t) => ({ title: t.title, text: `${t.detail} ${t.action}`, value: t.value, link: t.link }));
+  nextHarvests(books).filter((h) => h.overdueBy != null && h.overdueBy >= 3).forEach((h) => out.push({ title: `${h.name} is ${h.overdueBy} days past its usual round`, text: `Leaf left too long gets coarse and agents deduct more. Expect ${h.kgLow}–${h.kgHigh} kg with about ${h.workers ?? '?'} pickers.`, link: { field: h.fieldId } }));
+  const buy = manureBuyPlan(books);
+  if (buy.types.some((t) => t.toBuy > 0)) out.push({ title: 'Buy manure before the fields need it', text: `About ${buy.types.filter((t) => t.toBuy > 0).map((t) => `${t.toBuy} bags of ${t.name}`).join(', ')} for the fields due now. Buying several types in one trip shares one transport charge.`, link: { tab: 'plan' } });
+  books.leases.filter((l) => l.status === 'active' && l.daysLeft <= 60).forEach((l) => out.push({ title: `${l.fieldName}'s lease ends in ${l.daysLeft} days`, text: 'Decide now whether to lease it again or take it back: the Lease tab on the field compares the two with your own figures.', link: { field: l.fieldId } }));
+  books.agents.filter((a) => a.unratedKg > 0 && a.unrated.length && daysBetween(a.unrated[0].date, books.today) > 14).forEach((a) => out.push({ title: `${a.name} has not paid for ${a.unratedKg.toFixed(0)} kg`, text: `The oldest unpaid delivery is ${daysBetween(a.unrated[0].date, books.today)} days old. Ask for the rate and the payment.`, link: { tab: 'agents' } }));
+  return out;
+}
+
+// Every day in a period: harvested, marked "no harvest", or not accounted for.
+export function dayAccounting(books, period) {
+  const harvested = new Set(books.deliveries.map((d) => d.date));
+  const none = new Map(books.notes.filter((n) => n.kind === 'noharvest').map((n) => [n.date, n]));
+  const first = books.deliveries.length ? books.deliveries[0].date : null;
+  const from = first && first > period.from ? first : period.from;
+  const to = period.to < books.today ? period.to : books.today;
+  const days = { harvested: [], none: [], missing: [] };
+  if (!first || from > to || daysBetween(from, to) > 800) return { ...days, from, to };
+  for (let d = from; d <= to; d = addDays(d, 1)) {
+    if (harvested.has(d)) days.harvested.push(d); else if (none.has(d)) days.none.push(d); else days.missing.push(d);
+  }
+  return { ...days, from, to, noneNotes: none };
+}
+
+// What one worker earned, day by day, in a period
+export function workerDays(books, workerId, period) {
+  const w = books.workerById.get(workerId);
+  if (!w) return null;
+  const by = new Map();
+  w.rows.filter((r) => r.date >= period.from && r.date <= period.to).forEach((r) => {
+    if (!by.has(r.date)) by.set(r.date, { date: r.date, kg: 0, wage: 0, fields: new Set(), daily: 0 });
+    const d = by.get(r.date);
+    d.kg = r2(d.kg + r.netKg); d.wage = r2(d.wage + r.wage); d.fields.add(r.fieldName); d.daily = r2(d.daily + r.dayWage);
+  });
+  const days = [...by.values()].map((d) => ({ ...d, fields: [...d.fields].join(', ') })).sort((a, b) => b.date.localeCompare(a.date));
+  const pay = w.pay.filter((e) => e.date >= period.from && e.date <= period.to);
+  const adv = w.advances.filter((e) => e.date >= period.from && e.date <= period.to);
+  return { w, days, earned: sum(days, (d) => d.wage), kg: sum(days, (d) => d.kg), paid: sum(pay, (e) => e.amount), recovered: sum(pay, (e) => num(e.advanceRecovered)), pay, adv, advGiven: sum(adv, (e) => e.amount) };
+}

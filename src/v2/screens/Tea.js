@@ -140,7 +140,7 @@ function Account() {
 }
 
 function Fields() {
-  const { books, today, can } = useData();
+  const { books, today, can, run } = useData();
   const del = useDelete();
   return (
     <>
@@ -161,13 +161,24 @@ function Fields() {
       </div>
       {books.fields.length === 0 && <Card><Muted>No fields yet.</Muted><a className="v2-btn" href={href('/settings/lists')}>Add a field</a></Card>}
       {can.money && (
-        <Card title="Manure in stock" right={can.write && <a href={href('/stock')}>+ New purchase</a>}>
-          {books.stock.length === 0 && <Muted>No manure purchases logged.</Muted>}
-          {books.stock.map((s) => (
-            <Row key={s.id} top to={can.write ? href('/stock/' + s.id) : undefined} onDelete={can.write ? () => del.bill('stock', s.id, `the purchase of ${s.name}`) : undefined} deleteLabel={`Delete the purchase of ${s.name}`} left={<><strong>{s.name}</strong> · bought {fmtDate(s.date)}</>}
-              sub={`${s.bags} bags · ${inr(s.cost)}${num(s.transport) ? ` incl. ${inr(s.transport)} transport` : ''} · ${s.used} applied`}
+        <Card title="Manure">
+          <div className="v2-cols">
+            {can.write && <a className="v2-btn sec sm" href={href('/stock')}>+ Bought</a>}
+            {can.write && <a className="v2-btn sec sm" href={href('/mix')}>+ Mixed</a>}
+            {can.harvest && <a className="v2-btn sm" href={href('/apply')}>+ Applied to fields</a>}
+          </div>
+          {books.stock.length === 0 && <Muted>No manure logged yet.</Muted>}
+          {books.stock.map((s) => (s.kind === 'mix' ? (
+            <Row key={s.id} top to={can.write ? href('/mix/' + s.id) : undefined}
+              onDelete={can.write ? () => { if (s.used > 0) { del.bill('stock', s.id, s.name); return; } if (window.confirm(`Delete ${s.name}? The bags go back to what was bought.`)) run({ ops: [{ col: 'stock', id: s.id, remove: true }] }, 'Moved to the recycle bin'); } : undefined} deleteLabel={`Delete ${s.name}`}
+              left={<><strong>{s.name}</strong> · mixed {fmtDate(s.date)}</>}
+              sub={`${s.ratio.map((x) => `${x.name} ${x.qty}`).join(' + ')} bags → ${s.bags} mixed bags · ${inr(s.unitCost)} a bag · ${s.used} applied`}
               right={<Tag kind={s.left > 0 ? 'g' : 'n'}>{s.left} left</Tag>} />
-          ))}
+          ) : (
+            <Row key={s.id} top to={can.write ? href('/stock/' + s.id) : undefined} onDelete={can.write ? () => del.bill('stock', s.id, `the purchase of ${s.name}`) : undefined} deleteLabel={`Delete the purchase of ${s.name}`} left={<><strong>{s.name}</strong> · bought {fmtDate(s.date)}</>}
+              sub={`${s.bags} bags · ${inr(s.cost)}${num(s.transport) ? ` incl. ${inr(s.transport)} transport` : ''} · ${inr(s.unitCost)} a bag delivered · ${s.used} used`}
+              right={<Tag kind={s.left > 0 ? 'g' : 'n'}>{s.left} left</Tag>} />
+          )))}
         </Card>
       )}
     </>
@@ -180,7 +191,7 @@ function People() {
     <div className="v2-two">
       <Card title="Workers">
         {books.workers.filter((w) => w.active !== false || Math.abs(w.due) > 0.5 || w.advanceBalance > 0.5).map((w) => (
-          <Row key={w.id} top to={href('/pay', { type: 'worker', party: w.id })}
+          <Row key={w.id} top to={href('/worker/' + w.id)}
             left={<strong>{w.name}</strong>}
             sub={[
               w.due > 0.5 ? `${w.unpaidDays} unpaid ${w.unpaidDays === 1 ? 'day' : 'days'} · ${w.unpaidKg.toFixed(1)} kg` : 'Paid up',

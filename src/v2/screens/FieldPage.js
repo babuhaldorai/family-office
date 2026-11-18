@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useData } from '../data/DataContext';
-import { Page, Card, Row, Tag, Money, Tabs, Field, Num, Text, Area, Select, DateField, Btn, Check, Muted, Chips, PayHow, BarRow, Ask, askOp, go, back, href, useForm } from '../ui/kit';
+import { Page, Card, Row, Tag, Money, Tabs, Field, Num, Text, Area, Select, DateField, Btn, Check, Muted, Chips, PayHow, BarRow, Ask, askOp, go, href, useForm } from '../ui/kit';
 import { usePeriod, PeriodPicker } from '../ui/Period';
 import { WORK_TYPES, workCost } from '../core/books';
 import { fieldPlan, yearAhead, leaseAdvice, beforeAfter, scheduleOf } from '../core/insights';
-import { workOps, stockOps, leaseOps, removeWithPayments } from '../data/actions';
+import { workOps, leaseOps, removeWithPayments } from '../data/actions';
 import { useDelete } from '../data/useDelete';
 import { rainForecast } from '../data/weather';
 import { inr, num, sum, fmtDate, uid } from '../core/util';
@@ -51,7 +51,7 @@ function Plan({ field }) {
           <div>{it.reasons.join(' ')}</div>
           <div className="v2-row">
             <Muted>{it.estCost ? `About ${inr(it.estCost)} going by the last times` : 'No cost history yet'}</Muted>
-            {can.harvest && !leased && (it.status === 'now' || it.status === 'soon' || it.status === 'unknown') && <a className="v2-btn sec sm" href={href(`/field/${field.id}/work`, { add: it.type })}>Log it</a>}
+            {can.harvest && !leased && (it.status === 'now' || it.status === 'soon' || it.status === 'unknown') && <a className="v2-btn sec sm" href={it.type === 'manure' ? href('/apply', { field: field.id }) : href(`/field/${field.id}/work`, { add: it.type })}>Log it</a>}
           </div>
         </Card>
       ))}
@@ -120,6 +120,34 @@ function Work({ field, startAdding, editId }) {
 }
 
 export function WorkForm({ field, id, presetType, onDone }) {
+  const { books: bk, today: td } = useData();
+  const existing0 = bk.workById.get(id);
+  const leasedNow = !!bk.activeLeaseOn(field.id, td);
+  if (existing0 && existing0.groupId) {
+    return (
+      <Card title="Part of a day's manuring" hi>
+        <Muted>This was entered with the manure applied on {fmtDate(existing0.date)}, which may cover other fields too. Open that to change it.</Muted>
+        <a className="v2-btn" href={href('/apply/' + existing0.groupId)}>Open the day's manuring</a>
+        <Btn kind="sec" onClick={onDone}>Back</Btn>
+      </Card>
+    );
+  }
+  if (presetType === 'manure' && !id && !leasedNow) return <ManureChoice field={field} onDone={onDone} />;
+  return <WorkFormInner field={field} id={id} presetType={presetType} onDone={onDone} />;
+}
+
+function ManureChoice({ field, onDone }) {
+  return (
+    <Card title="Manuring" hi>
+      <Muted>Log manure that was applied on one or more fields in a day, from what you bought or mixed.</Muted>
+      <a className="v2-btn" href={href('/apply', { field: field.id })}>Apply manure from stock</a>
+      <Muted>If the lessee did it at their own cost, use the field work form instead.</Muted>
+      <Btn kind="sec" onClick={onDone}>Back</Btn>
+    </Card>
+  );
+}
+
+function WorkFormInner({ field, id, presetType, onDone }) {
   const { books, today, can, run } = useData();
   const existing = id ? books.workById.get(id) : null;
   const pay0 = existing ? books.entryById.get('pay-' + existing.id) : null;
@@ -326,41 +354,5 @@ function LeaseForm({ field, id, onDone }) {
       <div className="v2-cols"><Btn onClick={save}>Save lease</Btn><Btn kind="sec" onClick={onDone}>Cancel</Btn></div>
       {existing && <Btn kind="danger" onClick={() => { if (window.confirm('Move this lease and the payments recorded for it to the recycle bin?') && run(removeWithPayments('leases', existing.id, books), 'Moved to the recycle bin')) onDone(); }}>Delete</Btn>}
     </>
-  );
-}
-
-// Buying manure in bulk. Route: /stock and /stock/:id
-export function StockForm({ id }) {
-  const { books, today, can, run } = useData();
-  const existing = id ? books.stock.find((s) => s.id === id) : null;
-  const pay0 = existing ? books.entryById.get('pay-' + existing.id) : null;
-  const [f, set] = useForm(() => existing ? {
-    id: existing.id, date: existing.date, name: existing.name, bags: String(existing.bags), costPerBag: String(existing.costPerBag ?? ''), transport: existing.transport ? String(existing.transport) : '', vendor: existing.vendor || existing.vendorName || '', vendorId: existing.vendorId || '', note: existing.note || '',
-    pay: { paid: !!pay0 || existing.due < 0.5, mode: pay0?.mode || 'cash', by: pay0?.by || books.handlers[0], date: pay0?.date || existing.date },
-  } : { date: today, name: '', bags: '', costPerBag: '', transport: '', vendor: '', vendorId: '', note: '', pay: { paid: true, mode: 'cash', by: books.handlers[0], date: today } });
-  const total = num(f.bags) * num(f.costPerBag) + num(f.transport);
-  if (!can.write) return <Page title="Manure purchase" backTo="/tea/fields"><Card><Muted>You can look but not change.</Muted></Card></Page>;
-  if (id && !existing) return <Page title="Manure purchase" backTo="/tea/fields"><Card><Muted>This purchase is not there any more.</Muted></Card></Page>;
-  const used = existing ? existing.used : 0;
-  return (
-    <Page title={existing ? 'Edit manure purchase' : 'Manure bought'} narrow backTo="/tea/fields">
-      <Card>
-        <div className="v2-cols"><DateField label="Bought on" value={f.date} onChange={(v) => { set('date', v); set('pay', (p) => ({ ...p, date: v })); }} /><Field label="Type of manure"><Text value={f.name} onChange={(v) => set('name', v)} placeholder="NPK mix, Urea…" /></Field></div>
-        <div className="v2-cols"><Field label="Number of bags"><Num value={f.bags} onChange={(v) => set('bags', v)} /></Field><Field label="₹ per bag"><Num value={f.costPerBag} onChange={(v) => set('costPerBag', v)} /></Field></div>
-        <Field label="Vehicle rent or transport to bring it to the field (₹)"><Num value={f.transport} onChange={(v) => set('transport', v)} placeholder="0" /></Field>
-        <Field label="Shop"><Text value={f.vendor} onChange={(v) => set('vendor', v)} /></Field>
-        <Row left={<strong>Total</strong>} right={<span className="v2-big">{inr(total)}</span>} />
-        {num(f.bags) > 0 && <Muted>That is {inr(total / num(f.bags))} per bag including transport. This is the figure charged to a field when bags are applied.</Muted>}
-        {existing && existing.costOverride != null && <Muted>The total of {inr(existing.cost)} came from the old app. Saving replaces it with the total above.</Muted>}
-      </Card>
-      <Card>
-        <Check checked={f.pay.paid} onChange={(v) => set('pay', (p) => ({ ...p, paid: v }))}>Already paid</Check>
-        {f.pay.paid && <PayHow value={f.pay} onChange={(v) => set('pay', (p) => ({ ...p, ...v }))} handlers={books.handlers} />}
-      </Card>
-      <Field label="Note"><Text value={f.note} onChange={(v) => set('note', v)} /></Field>
-      {existing && <Card title="Applied so far"><Row left={`${used} of ${existing.bags} bags applied`} right={<Tag kind="g">{existing.left} left</Tag>} />{books.work.filter((w) => w.items.some((it) => it.stockId === existing.id)).map((w) => <Row key={w.id} to={href(`/field/${w.fieldId}/work`, { edit: w.id })} left={`${fmtDate(w.date)} · ${w.fieldName}`} right={`${sum(w.items.filter((it) => it.stockId === existing.id), (it) => it.qty)} bags`} />)}</Card>}
-      <Btn block onClick={() => { if (run(stockOps({ ...f, pay: { ...f.pay, date: f.pay.date || f.date } }, books), 'Purchase saved')) back('/tea/fields'); }}>Save purchase</Btn>
-      {existing && <Btn kind="danger" block onClick={() => { if (window.confirm('Move this purchase and its payment to the recycle bin?') && run(removeWithPayments('stock', existing.id, books), 'Moved to the recycle bin')) back('/tea/fields'); }}>Delete</Btn>}
-    </Page>
   );
 }

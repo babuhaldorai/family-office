@@ -2,7 +2,7 @@
 // same form and books always give the same changes, and one user action is
 // always saved as one all-or-nothing batch (for example an agent payment and
 // the rate it puts on its deliveries).
-import { r2, num, uid } from '../core/util';
+import { r2, num, uid, sum } from '../core/util';
 import { kgRateFor, workCost } from '../core/books';
 
 const clean = (o) => {
@@ -191,7 +191,8 @@ export function workOps(form, books) {
   };
   const cost = workCost(doc, books.stockById).cost;
   const ops = [set('work', id, doc)];
-  withPayment(ops, books, id, byLessee ? null : form.pay, { kind: 'work', workId: id, date: form.date, amount: cost });
+  if (!existing?.groupId) withPayment(ops, books, id, byLessee ? null : form.pay, { kind: 'work', workId: id, date: form.date, amount: cost });
+  else doc.groupId = existing.groupId;
   return { ops, id, cost };
 }
 
@@ -207,6 +208,119 @@ export function stockOps(form, books) {
   const ops = [set('stock', id, doc)];
   withPayment(ops, books, id, form.pay, { kind: 'stock', stockId: id, partyId: doc.vendorId, partyName: doc.vendor, date: form.date, amount: cost });
   return { ops, id, cost };
+}
+
+// ── Manure: buying several types at once ────────────────────────────────────
+// One purchase = one line per type, sharing one transport charge (split by
+// bags) and one payment.
+export function purchaseOps(form, books) {
+  const groupId = form.groupId || uid();
+  if (!form.date) return { error: 'Choose the date.' };
+  const lines = (form.lines || []).filter((l) => (l.name || '').trim() || num(l.bags) > 0);
+  if (!lines.length) return { error: 'Enter at least one type of manure.' };
+  if (lines.some((l) => !(l.name || '').trim())) return { error: 'Enter the type of manure on every line.' };
+  if (lines.some((l) => !(num(l.bags) > 0))) return { error: 'Enter the number of bags on every line.' };
+  const totalBags = lines.reduce((t, l) => t + num(l.bags), 0);
+  const transport = num(form.transport);
+  const before = books.stock.filter((x) => x.kind !== 'mix' && (x.groupId === groupId || x.id === groupId));
+  const tooFew = lines.find((l) => { const old = before.find((x) => x.id === l.id); return old && num(l.bags) < old.used; });
+  if (tooFew) { const old = before.find((x) => x.id === tooFew.id); return { error: `${old.used} bags of ${old.name} are already used, so it cannot be fewer than that.` }; }
+  const keep = new Set();
+  const ops = [];
+  let given = 0;
+  lines.forEach((l, i) => {
+    const id = l.id || uid();
+    keep.add(id);
+    const old = before.find((x) => x.id === id);
+    // the last line takes the remainder, so the shares add up to the whole transport charge
+    const share = i === lines.length - 1 ? r2(transport - given) : r2((transport * num(l.bags)) / totalBags);
+    given = r2(given + share);
+    ops.push(set('stock', id, {
+      date: form.date, groupId, name: l.name.trim(), bags: num(l.bags), costPerBag: num(l.costPerBag), transport: share,
+      vendorId: form.vendorId || '', vendor: form.vendor || '', note: form.note || '', createdAt: old?.createdAt,
+    }));
+  });
+  for (const old of before) {
+    if (keep.has(old.id)) continue;
+    if (old.used > 0) return { error: `${old.used} bags of ${old.name} are already used, so that line cannot be removed.` };
+    ops.push(del('stock', old.id));
+  }
+  const total = r2(lines.reduce((t, l) => t + num(l.bags) * num(l.costPerBag), 0) + transport);
+  // old single-line purchases kept their payment under their own id; replace it
+  books.entries.filter((e) => e.kind === 'stock' && before.some((x) => x.id === e.stockId) && e.id !== payId(groupId)).forEach((e) => ops.push(del('entries', e.id)));
+  const existing = books.entryById.get(payId(groupId));
+  if (form.pay && form.pay.paid && total > 0) {
+    ops.push(set('entries', payId(groupId), {
+      kind: 'stock', stockIds: [...keep], partyId: form.vendorId || '', partyName: form.vendor || '', date: form.pay.date || form.date,
+      amount: total, expected: total, mode: form.pay.mode || '', by: form.pay.by || '', createdAt: existing?.createdAt,
+    }));
+  } else if (existing) ops.push(del('entries', payId(groupId)));
+  return { ops, id: groupId, cost: total };
+}
+
+// ── Manure: mixing types together and filling the mix back into bags ────────
+export function mixOps(form, books) {
+  const id = form.id || uid();
+  if (!form.date) return { error: 'Choose the date.' };
+  const inputs = (form.inputs || []).filter((it) => it.stockId && num(it.qty) > 0).map((it) => ({ stockId: it.stockId, qty: num(it.qty) }));
+  if (inputs.length < 1) return { error: 'Choose what went into the mix, and how many bags of each.' };
+  if (new Set(inputs.map((it) => it.stockId)).size !== inputs.length) return { error: 'The same purchase is listed twice. Put its bags on one line.' };
+  if (!(num(form.bags) > 0)) return { error: 'Enter how many bags the mix was filled into.' };
+  const old = books.stock.find((x) => x.id === id && x.kind === 'mix');
+  if (old && num(form.bags) < old.used) return { error: `${old.used} bags of this mix are already applied.` };
+  for (const it of inputs) {
+    const st = books.stock.find((x) => x.id === it.stockId);
+    if (!st || st.kind === 'mix') return { error: 'A mix can only be made from manure that was bought.' };
+    const already = old ? (old.inputs.find((x) => x.stockId === it.stockId)?.qty || 0) : 0;
+    if (it.qty > st.left + already + 0.005) return { error: `Only ${r2(st.left + already)} bags of ${st.name} are left.` };
+  }
+  const name = (form.name || '').trim() || 'Mix of ' + inputs.map((it) => books.stockById.get(it.stockId)?.name).join(' + ');
+  return { ops: [set('stock', id, { kind: 'mix', date: form.date, name, inputs, bags: num(form.bags), note: form.note || '', createdAt: old?.createdAt })], id };
+}
+
+// ── Manure: one day's application, possibly to several fields ───────────────
+// Saves one work record per line (so each field keeps its own history) and
+// one payment for the day's applying.
+export function applyOps(form, books) {
+  const groupId = form.groupId || uid();
+  if (!form.date) return { error: 'Choose the date.' };
+  const lines = (form.lines || []).filter((l) => l.fieldId || l.stockId || num(l.bags) > 0);
+  if (!lines.length) return { error: 'Add at least one field.' };
+  if (lines.some((l) => !l.fieldId)) return { error: 'Choose the field on every line.' };
+  if (lines.some((l) => !l.stockId)) return { error: 'Choose which manure or mix went on every line.' };
+  if (lines.some((l) => !(num(l.bags) > 0))) return { error: 'Enter the bags applied on every line.' };
+  const before = books.work.filter((w) => w.groupId === groupId);
+  // bags available = what is left now, plus what this application already took
+  const need = new Map();
+  lines.forEach((l) => need.set(l.stockId, (need.get(l.stockId) || 0) + num(l.bags)));
+  for (const [sid, qty] of need) {
+    const st = books.stock.find((x) => x.id === sid);
+    const had = sum(before.flatMap((w) => w.items.filter((it) => it.stockId === sid)), (it) => it.qty);
+    if (!st || qty > st.left + had + 0.005) return { error: `Only ${r2((st ? st.left : 0) + had)} bags of ${st ? st.name : 'that manure'} are left.` };
+  }
+  const rate = num(form.rate);
+  const ops = [];
+  const keep = new Set();
+  lines.forEach((l) => {
+    const id = l.id || uid();
+    keep.add(id);
+    const old = books.workById.get(id);
+    ops.push(set('work', id, {
+      date: form.date, fieldId: l.fieldId, type: 'manure', groupId, labourMode: 'bag', bags: num(l.bags), rate,
+      items: [{ name: books.stockById.get(l.stockId)?.name || 'Manure', qty: num(l.bags), stockId: l.stockId }],
+      comment: form.comment || '', createdAt: old?.createdAt,
+    }));
+  });
+  before.filter((w) => !keep.has(w.id)).forEach((w) => ops.push(del('work', w.id)));
+  const labour = r2(lines.reduce((t, l) => t + num(l.bags), 0) * rate);
+  const existing = books.entryById.get(payId(groupId));
+  if (form.pay && form.pay.paid && labour > 0) {
+    ops.push(set('entries', payId(groupId), {
+      kind: 'work', workIds: [...keep], date: form.pay.date || form.date, amount: labour, expected: labour,
+      mode: form.pay.mode || '', by: form.pay.by || '', partyName: form.pay.to || '', createdAt: existing?.createdAt,
+    }));
+  } else if (existing) ops.push(del('entries', payId(groupId)));
+  return { ops, id: groupId, labour };
 }
 
 export function equipmentOps(form, books) {
@@ -237,13 +351,18 @@ export function leaseOps(form, books) {
 // Removing a bill also removes the payments recorded against it, in one batch.
 export function removeWithPayments(col, id, books) {
   const key = { work: 'workId', stock: 'stockId', equipment: 'equipmentId', leases: 'leaseId', tenancies: 'tenancyId' }[col];
+  // a line of a purchase, or a field in a day's application, goes with the rest of its group
+  const rec = col === 'stock' ? books.stock.find((x) => x.id === id) : col === 'work' ? books.workById.get(id) : null;
+  const group = rec && rec.groupId ? (col === 'stock' ? books.stock.filter((x) => x.groupId === rec.groupId && x.kind !== 'mix') : books.work.filter((w) => w.groupId === rec.groupId)) : rec ? [rec] : [{ id }];
   if (col === 'stock') {
-    const s = books.stock.find((x) => x.id === id);
-    if (s && s.used > 0) return { error: `${s.used} bags of this purchase are applied to fields. Remove those applications first.` };
+    const usedOne = group.find((x) => x.used > 0);
+    if (usedOne) return { error: `${usedOne.used} bags of ${usedOne.name} are used in a mix or on a field. Remove those first.` };
   }
-  const ops = [del(col, id)];
-  if (key) books.entries.filter((e) => e[key] === id).forEach((e) => ops.push(del('entries', e.id)));
-  return { ops, alsoRemoved: ops.length - 1 };
+  const ids = new Set(group.map((x) => x.id));
+  const ops = group.map((x) => del(col, x.id));
+  const arrKey = col === 'stock' ? 'stockIds' : col === 'work' ? 'workIds' : null;
+  if (key) books.entries.filter((e) => ids.has(e[key]) || (arrKey && (e[arrKey] || []).some((x) => ids.has(x)))).forEach((e) => ops.push(del('entries', e.id)));
+  return { ops, alsoRemoved: ops.length - group.length, groupSize: group.length };
 }
 
 // People, fields and properties that are used by other records cannot be

@@ -77,12 +77,13 @@ const assert = (c, m) => { if (!c) { throw new Error('ASSERT: ' + m); } console.
 
   // 5. manure applied from stock
   await nav('/field/f2/work?add=manure');
-  await page.getByRole('button', { name: '+ Add manure' }).click();
-  await page.getByLabel('Bags', { exact: true }).fill('4');
-  await page.getByLabel('₹ per bag to apply').fill('200');
+  await page.getByRole('link', { name: 'Apply manure from stock' }).click(); await page.waitForTimeout(300);
+  { const sel = page.getByLabel('Line 1 manure'); const o = (await sel.locator('option').allInnerTexts()).find((x) => /^NPK mix/.test(x)); await sel.selectOption({ label: o }); }
+  await page.getByLabel('Line 1 bags applied').fill('4');
+  await page.getByRole('textbox', { name: '₹ per bag to apply' }).fill('200');
   t = await text();
-  assert(/To pay for this work\s*₹800/.test(t) && /already paid\s*₹5,760/.test(t), 'applying 4 bags: 800 to pay, 5,760 of manure from stock');
-  await page.getByRole('button', { name: 'Save field work' }).click(); await page.waitForTimeout(400);
+  assert(/4 bags × ₹200 to apply\s*₹800/.test(t) && /already paid\s*₹5,760/.test(t), 'applying 4 bags: 800 to pay, 5,760 of manure from stock');
+  await page.getByRole('button', { name: 'Save', exact: true }).click(); await page.waitForTimeout(400);
   await nav('/tea/fields');
   assert(/NPK mix[\s\S]*?8 left/.test(await text()), 'NPK stock went from 12 to 8 left');
 

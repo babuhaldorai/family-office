@@ -7,7 +7,7 @@ import { MODE_LABEL, DIFF_LABEL } from '../core/books';
 import { doBetter, spendingGrowth, forecastNextMonth } from '../core/insights';
 import { entriesCSV } from '../core/backup';
 import { useDelete } from '../data/useDelete';
-import { nextHarvests, manureNeeds, pendingWork, summaryForAI } from '../core/planner';
+import { nextHarvests, manureNeeds, manureBuyPlan, pendingWork, summaryForAI, dayAccounting } from '../core/planner';
 import { aiAccess, AI_DAILY_LIMIT } from '../core/ai';
 import { uid as newId } from '../core/util';
 
@@ -244,10 +244,33 @@ function Plan() {
         <Row left={<strong>To buy</strong>} right={<strong>{manure.toBuy} bags{manure.cost ? ` · about ${inr(manure.cost)}` : ''}</strong>} />
         {manure.cost != null && <Muted>Cost uses the price of your last purchase ({inr(manure.lastPrice)} a bag with transport).</Muted>}
       </Card>
+      <BuyPlan />
       <Card title="Which type of manure, and why">
         <Muted>The app can show what you used before and how the yield moved afterwards (above), but it cannot tell you which fertilizer the soil needs: that depends on a soil test (pH and nutrient levels), the age of the bushes and when they were last pruned. A soil test through the Tea Board or UPASI advisory service, or a local agricultural office, costs little and gives a specific recommendation. The “Do better” tab has a button to take your figures to an AI assistant for a general second opinion.</Muted>
       </Card>
     </>
+  );
+}
+
+function BuyPlan() {
+  const { books, can } = useData();
+  const plan = useMemo(() => manureBuyPlan(books), [books]);
+  return (
+    <Card title="Manure to buy, by type" right={can.write && <a href={href('/stock')}>+ Bought</a>}>
+      {plan.due.length === 0 && <Muted>No field is due for manuring now.</Muted>}
+      {plan.due.map((d) => (
+        <Row key={d.fieldId} top to={href('/field/' + d.fieldId)} left={<strong>{d.name}</strong>}
+          sub={d.bags ? `${d.rate} bags an acre (${d.own ? 'its own last manurings' : 'average of the other fields'})${d.adj !== 1 ? `, × ${d.adj} for its yield` : ''}. ${Object.keys(d.comp).length ? 'Mix as ' + d.compFrom + ': ' + Object.entries(d.comp).map(([k, v]) => `${k} ${Math.round(v * 100)}%`).join(', ') : 'No mix on record to split by.'}` : d.why}
+          right={<span>{d.bags ? <strong>{d.bags} bags</strong> : <Tag kind="n">?</Tag>} <Tag>{d.tag}</Tag></span>} />
+      ))}
+      {plan.types.length > 0 && (<>
+        <div className="v2-flab" style={{ marginTop: 6 }}>By type</div>
+        {plan.types.map((t) => <Row key={t.name} left={<strong>{t.name}</strong>} sub={`Needed ${t.need} · in stock ${Math.floor(t.have)}${t.price != null ? ` · last bought at ${inr(t.price)} a bag delivered` : ''}`} right={<strong>{t.toBuy ? `Buy ${t.toBuy}` : 'Enough'}{t.cost ? ` · ${inr(t.cost)}` : ''}</strong>} />)}
+        {plan.cost > 0 && <Row left={<strong>Likely cost</strong>} right={<strong>{inr(plan.cost)}</strong>} />}
+      </>)}
+      {plan.unsplit > 0 && <Muted>{plan.unsplit} bags could not be split by type because no mix is on record for those fields.</Muted>}
+      <Muted>A field that gives more leaf per acre than your average takes more out of the soil, so it is given up to 20% more; a weaker one up to 20% less. Bags in mixes still in stock are counted by what is in them.</Muted>
+    </Card>
   );
 }
 
@@ -295,8 +318,8 @@ function WorkersTab({ period }) {
       <Table head={['Worker', { label: 'Days', r: 1 }, { label: 'Net kg', r: 1 }, { label: 'Earned', r: 1 }, { label: 'Paid', r: 1 }, { label: 'Extra given', r: 1 }, { label: 'Still due (all time)', r: 1 }, { label: 'Advance owed', r: 1 }]}
         rows={rows.map((w) => ({ key: w.id, cells: [w.name, w.days, w.netKg.toFixed(1), inr(w.earned), inr(w.paid), w.extraPaid ? inr(w.extraPaid) : '', inr(w.due), inr(w.advanceBalance)] }))}
         foot={['Total', '', sum(rows, (w) => w.netKg).toFixed(1), inr(sum(rows, (w) => w.earned)), inr(sum(rows, (w) => w.paid)), inr(sum(rows, (w) => w.extraPaid)), inr(sum(rows, (w) => w.due)), inr(sum(rows, (w) => w.advanceBalance))]}
-        onRow={(r) => go('/reports/entries', { party: r.key, all: 1 })} />
-      <Muted>"Paid" is the cash handed over in the period. Advances taken back from wages are not cash, so earned can be more than paid without anything being due.</Muted>
+        onRow={(r) => go('/worker/' + r.key)} />
+      <Muted>Tap a worker to see what they earned day by day. "Paid" is the cash handed over in the period. Advances taken back from wages are not cash, so earned can be more than paid without anything being due.</Muted>
     </Card>
   );
 }
@@ -322,7 +345,7 @@ function RentalsTab({ period }) {
 }
 
 function Entries({ period, query }) {
-  const { books, can } = useData();
+  const { books, can, run } = useData();
   const del = useDelete();
   const wide = useWide();
   const [q, setQ] = useState('');
@@ -351,6 +374,12 @@ function Entries({ period, query }) {
     && (!needle || `harvest ${d.agentName} ${d.fieldName} ${d.workers.map((w) => books.nameOf(w.workerId)).join(' ')} ${d.net} ${d.note || ''}`.toLowerCase().includes(needle)))),
   [books, period, show, biz, party, partyName, by, mode, cat, needle]);
 
+  // days marked "no harvest", so every day is accounted for
+  const nones = useMemo(() => ((show !== 'all' && show !== 'harvest') || party || by || mode || cat || (biz !== 'all' && biz !== 'tea') ? []
+    : books.notes.filter((n) => n.kind === 'noharvest' && inRange(n.date, period) && (!needle || 'no harvest'.includes(needle)))),
+  [books, period, show, party, by, mode, cat, biz, needle]);
+  const days = useMemo(() => dayAccounting(books, period), [books, period]);
+  const markNone = (d) => run({ ops: [{ col: 'notes', id: 'noharvest-' + d, data: { kind: 'noharvest', date: d, by: '' } }] }, `${fmtDate(d)} marked as no harvest`);
   const totalIn = sum(money.filter((e) => e.dir === 'in'), (e) => e.amount);
   const totalOut = sum(money.filter((e) => e.dir === 'out'), (e) => e.amount);
   // running total, oldest first, starting from zero on the first day shown
@@ -358,16 +387,17 @@ function Entries({ period, query }) {
   const rows = useMemo(() => [
     ...money.map((e) => ({ type: 'money', id: e.id, date: e.date, at: e.updatedAt || '', e })),
     ...harvests.map((d) => ({ type: 'harvest', id: d.id, date: d.date, at: d.updatedAt || '', d })),
-  ].sort((a, b) => b.date.localeCompare(a.date) || String(b.at).localeCompare(String(a.at))), [money, harvests]);
+    ...nones.map((n) => ({ type: 'none', id: n.id, date: n.date, at: n.updatedAt || '', n })),
+  ].sort((a, b) => b.date.localeCompare(a.date) || String(b.at).localeCompare(String(a.at))), [money, harvests, nones]);
 
   const diffTag = (e) => (Math.abs(e.diff) > 0.005 ? <Tag>{inr(Math.abs(e.diff))} {e.diff > 0 ? 'extra' : 'short'}{e.diffReason ? ' · ' + DIFF_LABEL[e.diffReason] : ''}</Tag> : null);
   const harvestFor = (d) => `Harvest · ${d.fieldName} · ${d.net.toFixed(1)} kg`;
   const harvestNote = (d) => `${can.money ? `Wages earned ${inr(d.wages)} · ` : ''}${d.value != null ? `agent to pay ${inr(d.value)}` : 'rate not known yet'}`;
-  const open = (r) => { if (r.type === 'harvest') { if (can.harvest) go('/harvest/' + r.id); } else if (can.write) go('/pay', { entry: r.id }); };
-  const remove = (r) => (r.type === 'harvest' ? del.delivery(r.id) : del.entry(r.id));
+  const open = (r) => { if (r.type === 'none') { if (can.harvest) go('/harvest', { date: r.date }); return; } if (r.type === 'harvest') { if (can.harvest) go('/harvest/' + r.id); } else if (can.write) go('/pay', { entry: r.id }); };
+  const remove = (r) => (r.type === 'harvest' ? del.delivery(r.id) : r.type === 'none' ? (window.confirm(`Undo “no harvest” for ${fmtDate(r.date)}?`) && run({ ops: [{ col: 'notes', id: r.id, remove: true }] }, 'Undone')) : del.entry(r.id));
   const months = [];
   rows.forEach((r) => { const mk = r.date.slice(0, 7); if (!months.length || months[months.length - 1].mk !== mk) months.push({ mk, rows: [] }); months[months.length - 1].rows.push(r); });
-  const count = `${money.length} ${money.length === 1 ? 'payment' : 'payments'}${harvests.length ? ` and ${harvests.length} ${harvests.length === 1 ? 'harvest' : 'harvests'}` : ''}`;
+  const count = `${money.length} ${money.length === 1 ? 'payment' : 'payments'}${harvests.length ? `, ${harvests.length} ${harvests.length === 1 ? 'harvest' : 'harvests'}` : ''}${nones.length ? `, ${nones.length} no-harvest ${nones.length === 1 ? 'day' : 'days'}` : ''}`;
   return (
     <>
       <Text value={q} onChange={setQ} type="search" placeholder="Search a name, amount or comment" aria-label="Search" />
@@ -389,13 +419,25 @@ function Entries({ period, query }) {
           <Muted>{count}. Tap one to open it; the bin icon deletes it.</Muted>
           {money.length > 0 && <button type="button" className="v2-link" onClick={() => download(`entries-${period.from}-to-${period.to}.csv`, entriesCSV(books, money))}>Download for Excel</button>}
         </div>
+        {(show === 'all' || show === 'harvest') && days.harvested.length + days.none.length + days.missing.length > 0 && (
+          <div className="v2-stack" style={{ gap: 6, borderTop: '1px solid var(--line2)', paddingTop: 8 }}>
+            <div><strong>Every day accounted for?</strong> {days.harvested.length} harvested · {days.none.length} no harvest · <span className={days.missing.length ? 'v2-red' : 'v2-green'}>{days.missing.length} not logged</span> <span className="v2-muted">({fmtDate(days.from, { year: false })} to {fmtDate(days.to, { year: false })})</span></div>
+            {days.missing.length > 0 && <Muted>Tap a date to mark it “no harvest”, or log the harvest from Home.</Muted>}
+            {days.missing.length > 0 && can.harvest && (
+              <div className="v2-chips">{days.missing.slice(-31).reverse().map((d) => <button key={d} type="button" className="v2-chip sm" onClick={() => markNone(d)}>{fmtDate(d, { dow: true, year: false })}</button>)}</div>
+            )}
+            {days.missing.length > 31 && <Muted>Showing the latest 31 of {days.missing.length}. Choose a shorter period to see the rest.</Muted>}
+          </div>
+        )}
         {harvests.length > 0 && <Muted>Harvests are listed so nothing you logged is missing, but they are not money: the totals above count payments only.</Muted>}
       </Card>
       {wide ? (
         <Card>
           <Table head={['Date', 'With', 'For', { label: 'In', r: 1 }, { label: 'Out', r: 1 }, 'How', 'Handled by', 'Difference', 'Comment', { label: 'Running total', r: 1 }]} empty="Nothing matches."
             onRow={open} onDelete={can.write || can.harvest ? remove : undefined}
-            rows={rows.map((r) => (r.type === 'harvest'
+            rows={rows.map((r) => (r.type === 'none'
+              ? { key: 'n' + r.id, id: r.id, type: r.type, noDelete: !can.harvest, deleteLabel: 'Undo no harvest', cells: [fmtDate(r.date), '', 'No harvest that day', '', '', '', r.n.by || '', <Tag kind="n">No harvest</Tag>, '', ''] }
+              : r.type === 'harvest'
               ? { key: 'h' + r.id, id: r.id, type: r.type, noDelete: !can.harvest, deleteLabel: 'Delete this harvest', cells: [fmtDate(r.date), r.d.agentName, harvestFor(r.d), '', '', '', '', <Tag kind="n">Harvest</Tag>, harvestNote(r.d), ''] }
               : { key: r.id, id: r.id, type: r.type, noDelete: !can.write, deleteLabel: 'Delete this payment', cells: [fmtDate(r.date), r.e.party, r.e.forText, r.e.dir === 'in' ? inr(r.e.amount) : '', r.e.dir === 'out' ? inr(r.e.amount) : '', MODE_LABEL[r.e.mode] || '', r.e.by || '', diffTag(r.e), [r.e.diffComment, r.e.note].filter(Boolean).join(' · '), inr(running.get(r.id))] }))}
             foot={['Total', count, '', inr(totalIn), inr(totalOut), '', '', '', '', inr(totalIn - totalOut)]} />
@@ -403,7 +445,10 @@ function Entries({ period, query }) {
         </Card>
       ) : months.map((m) => (
         <Card key={m.mk} title={fmtMonth(m.mk)}>
-          {m.rows.map((r) => (r.type === 'harvest' ? (
+          {m.rows.map((r) => (r.type === 'none' ? (
+            <Row key={'n' + r.id} onClick={can.harvest ? () => open(r) : undefined} onDelete={can.harvest ? () => remove(r) : undefined} deleteLabel="Undo no harvest"
+              left={<><strong>{fmtDate(r.date, { dow: true, year: false })}</strong> · no harvest</>} right={<Tag kind="n">No harvest</Tag>} />
+          ) : r.type === 'harvest' ? (
             <Row key={'h' + r.id} top onClick={can.harvest ? () => open(r) : undefined} onDelete={can.harvest ? () => remove(r) : undefined} deleteLabel="Delete this harvest"
               left={<><strong>{r.d.agentName}</strong> · {harvestFor(r.d)}</>}
               sub={<>{fmtDate(r.date, { year: false })} · {harvestNote(r.d)}</>}

@@ -1,7 +1,7 @@
 const { chromium } = require('playwright');
 const out = process.argv[2];
 const routes = ['/', '/harvest', '/harvest/d5', '/pay', '/pay?type=worker&party=w3', '/pay?type=worker&party=w1', '/pay?type=tenant&tenancy=tn1', '/pay?type=bill', '/pay?type=other', '/pay?entry=sale-nov', '/pay?entry=pay-w1',
- '/tea', '/tea/account', '/tea/fields', '/tea/people', '/tea/equipment', '/field/f2', '/field/f1/work', '/field/f1/work?add=manure', '/field/f1/money', '/field/f3/lease', '/field/f1/lease', '/stock', '/stock/s1',
+ '/tea', '/tea/account', '/tea/fields', '/tea/people', '/tea/equipment', '/field/f2', '/field/f1/work', '/field/f1/work?add=manure', '/field/f1/money', '/field/f3/lease', '/field/f1/lease', '/stock', '/stock/s1', '/mix', '/apply', '/apply?field=f2', '/worker/w1', '/worker/w3',
  '/rentals', '/homes', '/property/p1', '/property/p3', '/reports', '/reports/plan', '/reports/better', '/reports/fields', '/reports/agents', '/reports/workers', '/reports/rentals', '/reports/entries',
  '/settings', '/settings/lists', '/settings/users', '/settings/backup', '/settings/checks', '/settings/history', '/settings/bin', '/settings/import', '/settings/reminders', '/settings/ai'];
 (async () => {

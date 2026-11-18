@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { useData } from '../data/DataContext';
-import { Page, Card, Row, Tag, Money, Text, Btn, Muted, Select, href } from '../ui/kit';
+import { Page, Card, Row, Tag, Text, Btn, Muted, Select, href } from '../ui/kit';
 import { fmtDate, addDays, periodFor, uid, inr } from '../core/util';
-import { doBetter } from '../core/insights';
+import { ideasForHome } from '../core/planner';
+import { daysBetween } from '../core/util';
 
 export default function Home() {
   const { books, today, can, run, user } = useData();
@@ -12,7 +13,11 @@ export default function Home() {
   const [me, setMeState] = useState(() => { try { return window.localStorage.getItem('fo-me') || ''; } catch (e) { return ''; } });
   const setMe = (v) => { setMeState(v); try { window.localStorage.setItem('fo-me', v); } catch (e) { /* private window */ } };
   const month = useMemo(() => books.pnl(periodFor('month', today)), [books, today]);
-  const tips = useMemo(() => (can.money ? doBetter(books).slice(0, 2) : []), [books, can.money]);
+  const ideas = useMemo(() => (can.money ? ideasForHome(books) : []), [books, can.money]);
+  // a different idea each day; "Another idea" steps through the rest
+  const [shift, setShift] = useState(0);
+  const idea = ideas.length ? ideas[(daysBetween('2026-01-01', today) + shift) % ideas.length] : null;
+  const ideaLink = (t) => (t.link?.field ? href('/field/' + t.link.field) : t.link?.property ? href('/property/' + t.link.property) : t.link?.entries ? href('/reports/entries', t.link.entries) : t.link?.tab ? href('/reports/' + t.link.tab) : href('/reports/better'));
 
   const allTodos = books.notes.filter((n) => n.kind === 'todo' && !n.done).sort((a, b) => String(b.date).localeCompare(String(a.date)));
   const todos = allTodos.filter((n) => !me || !n.assignee || n.assignee === me);
@@ -110,12 +115,11 @@ export default function Home() {
         </Card>
       )}
 
-      {tips.length > 0 && (
-        <Card title="Where to do better" right={<a href={href('/reports/better')}>See all</a>}>
-          {tips.map((t, i) => (
-            <Row key={i} top to={href('/reports/better')} left={<strong>{t.title}</strong>} sub={t.action}
-              right={t.value ? <Tag kind="g">about <Money v={t.value} /> a year</Tag> : t.tag ? <Tag>{t.tag}</Tag> : null} />
-          ))}
+      {idea && (
+        <Card title="Idea for today" right={ideas.length > 1 && <button type="button" className="v2-link" onClick={() => setShift((x) => x + 1)}>Another idea</button>}>
+          <div className="v2-row top" style={{ minHeight: 0 }}><strong>{idea.title}</strong>{idea.value ? <Tag kind="g">about {inr(idea.value)} a year</Tag> : null}</div>
+          <div>{idea.text}</div>
+          <a href={ideaLink(idea)}>See what this is based on</a>
         </Card>
       )}
     </Page>

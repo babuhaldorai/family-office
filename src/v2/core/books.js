@@ -193,12 +193,32 @@ export function buildBooks(raw, today) {
   const rainByDate = new Map(live(raw.rain).map((r) => [r.date || r.id, r]));
 
   // ── stock (manure and material bought in bulk) ───────────────────────────
-  const stockBase = live(raw.stock).map((s) => {
+  // Bought lines first; a mix is made from bought lines, so its cost is the
+  // value of what went into it, spread over the bags it was filled into.
+  const bought = live(raw.stock).filter((s) => s.kind !== 'mix').map((s) => {
     const bags = num(s.bags);
     const cost = s.costOverride != null ? num(s.costOverride) : r2(bags * num(s.costPerBag) + num(s.transport));
     return { ...s, bags, cost, unitCost: bags > 0 ? cost / bags : 0 };
   });
+  const boughtById = new Map(bought.map((s) => [s.id, s]));
+  const mixes = live(raw.stock).filter((s) => s.kind === 'mix').map((s) => {
+    const inputs = (s.inputs || []).map((it) => ({ ...it, qty: num(it.qty), name: boughtById.get(it.stockId)?.name || 'Manure', unitCost: boughtById.get(it.stockId)?.unitCost || 0 }));
+    const bags = num(s.bags);
+    const cost = r2(sum(inputs, (it) => it.qty * it.unitCost));
+    const inBags = sum(inputs, (it) => it.qty);
+    return { ...s, inputs, bags, cost, unitCost: bags > 0 ? cost / bags : 0, inBags, ratio: inputs.map((it) => ({ name: it.name, qty: it.qty, share: inBags > 0 ? it.qty / inBags : 0 })) };
+  });
+  const stockBase = [...bought, ...mixes];
   const stockById = new Map(stockBase.map((s) => [s.id, s]));
+  // what one bag of a stock item is made of, by type of manure (shares add up to 1)
+  const compositionOf = (id) => {
+    const st = stockById.get(id);
+    if (!st) return {};
+    if (st.kind !== 'mix') return { [st.name || 'Manure']: 1 };
+    const out = {};
+    st.ratio.forEach((x) => { out[x.name] = (out[x.name] || 0) + x.share; });
+    return out;
+  };
 
   // ── deliveries ───────────────────────────────────────────────────────────
   const deliveries = live(raw.deliveries).map((d) => ({
@@ -215,9 +235,9 @@ export function buildBooks(raw, today) {
   const workById = new Map(work.map((w) => [w.id, w]));
 
   const usedByStock = new Map();
-  work.forEach((w) => w.items.forEach((it) => {
-    if (it.stockId) usedByStock.set(it.stockId, r2((usedByStock.get(it.stockId) || 0) + it.qty));
-  }));
+  const useStock = (id, qty) => usedByStock.set(id, r2((usedByStock.get(id) || 0) + qty));
+  work.forEach((w) => w.items.forEach((it) => { if (it.stockId) useStock(it.stockId, it.qty); }));
+  mixes.forEach((m) => m.inputs.forEach((it) => useStock(it.stockId, it.qty)));
 
   const equipmentBase = live(raw.equipment).map((q) => ({
     ...q, cost: num(q.cost), lifeYears: Math.max(1, num(q.lifeYears) || 5),
@@ -245,7 +265,14 @@ export function buildBooks(raw, today) {
       return `Rent${ms ? ' · ' + ms : ''}${t ? ' · ' + propName(t.propertyId) : e.propertyId ? ' · ' + propName(e.propertyId) : ''}`;
     }
     if (k === 'work') { const w = workById.get(e.workId); return w ? `${w.typeLabel} · ${w.fieldName || 'no field'}` : 'Field work'; }
-    if (k === 'stock') { const s = stockById.get(e.stockId); return s ? `${s.name || 'Manure'} · ${s.bags} bags` : 'Manure bought'; }
+    if (k === 'stock') {
+      const ss = e.stockIds ? e.stockIds.map((id) => stockById.get(id)).filter(Boolean) : [stockById.get(e.stockId)].filter(Boolean);
+      return ss.length ? `${ss.map((x) => x.name || 'Manure').join(' + ')} · ${sum(ss, (x) => x.bags)} bags` : 'Manure bought';
+    }
+    if (k === 'work' && e.workIds) {
+      const ws = e.workIds.map((id) => workById.get(id)).filter(Boolean);
+      return `Applying manure · ${[...new Set(ws.map((w) => w.fieldName))].join(', ')} · ${sum(ws, (w) => num(w.bags))} bags`;
+    }
     if (k === 'equipment') { const q = equipmentById.get(e.equipmentId); return q ? `${q.name} bought` : 'Equipment bought'; }
     if (k === 'equipment_run') { const q = equipmentById.get(e.equipmentId); return `${e.category || 'Running cost'}${q ? ' · ' + q.name : ''}`; }
     if (k === 'lease_rent' || k === 'lease_deposit' || k === 'lease_deposit_return') {
@@ -263,7 +290,7 @@ export function buildBooks(raw, today) {
     if (e.partyId && personById.has(e.partyId)) return nameOf(e.partyId);
     if (e.partyName) return e.partyName;
     if (e.leaseId && leaseById.has(e.leaseId)) return leaseById.get(e.leaseId).lessee || 'Lessee';
-    if (e.kind === 'work') return workById.get(e.workId)?.typeLabel || 'Field work';
+    if (e.kind === 'work') return e.workIds ? 'Applying manure' : workById.get(e.workId)?.typeLabel || 'Field work';
     return KINDS[e.kind]?.cat || '';
   };
   const entries = rawEntries.map((e) => {
@@ -374,11 +401,30 @@ export function buildBooks(raw, today) {
   });
 
   // ── bills that may still be unpaid: field work, stock, equipment ─────────
-  const paidFor = (key, id) => sum(entriesBy((e) => e[key] === id && (e.kind === 'work' || e.kind === 'stock' || e.kind === 'equipment')), settledCash);
+  // One payment can cover several bills (a purchase of several manure types,
+  // or one day's application across several fields): it is shared between
+  // them in proportion to their cost.
+  const billPaid = new Map();
+  const billCost = (key, id) => (key === 'workIds' ? workById.get(id)?.cost : stockById.get(id)?.cost) || 0;
+  entriesBy((e) => e.kind === 'work' || e.kind === 'stock' || e.kind === 'equipment').forEach((e) => {
+    const amt = settledCash(e);
+    const add = (id, v) => billPaid.set(id, r2((billPaid.get(id) || 0) + v));
+    if (e.workId) add(e.workId, amt);
+    if (e.stockId) add(e.stockId, amt);
+    if (e.equipmentId && e.kind === 'equipment') add(e.equipmentId, amt);
+    ['workIds', 'stockIds'].forEach((key) => {
+      const ids = e[key] || [];
+      if (!ids.length) return;
+      const total = sum(ids, (id) => billCost(key, id));
+      ids.forEach((id) => add(id, total > 0 ? (amt * billCost(key, id)) / total : amt / ids.length));
+    });
+  });
+  const paidFor = (key, id) => billPaid.get(id) || 0;
   work.forEach((w) => { w.paid = paidFor('workId', w.id); w.due = r2(w.cost - w.paid); });
   const stock = stockBase.map((s) => {
     const used = usedByStock.get(s.id) || 0;
-    const paid = paidFor('stockId', s.id);
+    // a mix is paid for through what went into it
+    const paid = s.kind === 'mix' ? s.cost : paidFor('stockId', s.id);
     return { ...s, used, left: r2(s.bags - used), paid, due: r2(s.cost - paid), vendorName: nameOf(s.vendorId) || s.vendor || '' };
   }).sort(byDateDesc);
   const equipment = equipmentBase.map((q) => {
@@ -662,9 +708,12 @@ export function buildBooks(raw, today) {
     (e.partyId && !personById.has(e.partyId)) ||
     (e.deliveryIds || []).some((id) => !deliveryById.has(id)) ||
     (e.workId && !workById.has(e.workId)) || (e.stockId && !stockById.has(e.stockId)) ||
+    (e.workIds || []).some((id) => !workById.has(id)) || (e.stockIds || []).some((id) => !stockById.has(id)) ||
     (e.equipmentId && !equipmentById.has(e.equipmentId)) || (e.leaseId && !leaseById.has(e.leaseId)) ||
     (e.tenancyId && !tenancyById.has(e.tenancyId)));
   check('Every payment points to things that still exist', dangling.length === 0, `${dangling.length} payment linked to something deleted`);
+  const brokenMix = mixes.filter((m) => m.inputs.some((it) => !boughtById.has(it.stockId)));
+  check('Every mix is made from manure that is still on record', brokenMix.length === 0, `${brokenMix.map((m) => m.name).join(', ')}`);
   const overUsed = stock.filter((s) => s.left < -TOL);
   check('No more manure applied than was bought', overUsed.length === 0, `${overUsed.map((s) => s.name).join(', ')}`);
   const badEntries = entries.filter((e) => !KINDS[e.kind] || !(e.amount >= 0) || !e.date);
@@ -673,7 +722,7 @@ export function buildBooks(raw, today) {
   return {
     today, settings, handlers,
     people, fields, properties, personById, fieldById, propertyById, nameOf, fieldName, propName,
-    deliveries, deliveryById, work, workById, stock, stockById, equipment, equipmentById,
+    deliveries, deliveryById, work, workById, stock, stockById, compositionOf, equipment, equipmentById,
     agents, agentById, workers, workerById: new Map(workers.map((w) => [w.id, w])),
     tenancies, tenancyById: new Map(tenancies.map((t) => [t.id, t])), leases, leaseById: new Map(leases.map((l) => [l.id, l])),
     activeLeaseOn, entries, entryById: new Map(entries.map((e) => [e.id, e])),
