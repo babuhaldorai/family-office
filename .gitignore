@@ -24,3 +24,4 @@ yarn-error.log*
 
 # patch files
 *.patch
+undefined/
