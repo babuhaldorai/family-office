@@ -41,6 +41,7 @@ REACT_APP_DEMO=1 CI=true npx react-scripts build
 Then serve `build/` on port 4173 and run `scripts/smoke-sample.js` and `scripts/e2e-sample*.js`
 with Playwright. Sample mode uses made-up data in memory and never touches Firebase.
 `scripts/rules-emulator-test.js` checks the database rules on the Firestore emulator.
+Sample tests: `smoke-sample.js`, `e2e-sample.js` to `e2e-sample-5.js`.
 
 ## Decisions the owner made (do not undo without asking)
 - Harvest form is laid out like the paper slip: one block per worker with bags, then that worker's
@@ -51,14 +52,18 @@ with Playwright. Sample mode uses made-up data in memory and never touches Fireb
 - Manure: one purchase can hold several types sharing one transport charge; mixes record what went in
   and how many bags came out; one day's application can cover several fields at a rate per bag.
 - Reading numbers from slip photos was removed (it would cost money). Photos are only stored.
+- Every payment (agent, worker and the rest) can carry one optional photo (`photoPath`, stored under
+  `payments/` in the bucket). Only Owner and manager can add it; viewers can see it; Data entry cannot.
 - AI summaries: off by default; the Owner switches them on and picks who may use them; at most 2 a day.
 - Backups: every night, only if something changed, to the storage bucket and a private GitHub repo.
 - Reminder emails: per address, each person gets one combined email (rent not logged, their action
   items, optionally everything else that needs attention).
 
-## Where things stood (19 Nov 2026)
+## Where things stood (20 Nov 2026)
 - Staging holds the records the owner wants to keep. Next step is going live: see `PRODUCTION.md`.
   The owner is taking two backups first (production old app, and staging) and will say "go".
 - Working on staging: GitHub backup, reminder emails.
-- Not confirmed yet: the iPhone status-bar fix (needs the app re-added to the home screen),
+- Not confirmed yet: payment photo upload on the real staging site (sample mode cannot store photos,
+  and the storage rules could not be checked on the emulator in the cloud container),
+  the iPhone status-bar fix (needs the app re-added to the home screen),
   phone sign-in through the site's own address, AI summaries with a real key.

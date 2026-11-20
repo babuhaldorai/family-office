@@ -1,4 +1,4 @@
-// Photos of harvest slips: shrunk on the device and kept in the storage bucket
+// Photos of harvest slips and payment receipts: shrunk on the device and kept in the storage bucket
 // for reference. Nothing is read from the photo and nothing leaves Firebase.
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import app from '../../firebase';
@@ -18,8 +18,9 @@ export async function shrink(file, max = 1600) {
   return blob;
 }
 
-export async function keepPhoto(blob, date) {
-  const path = `slips/${(date || 'undated').slice(0, 7)}/${date || 'undated'}-${uid()}.jpg`;
+// folder: 'slips' for harvest slips, 'payments' for payment receipts.
+export async function keepPhoto(blob, date, folder = 'slips') {
+  const path = `${folder}/${(date || 'undated').slice(0, 7)}/${date || 'undated'}-${uid()}.jpg`;
   await uploadBytes(ref(getStorage(app), path), blob, { contentType: 'image/jpeg' });
   return path;
 }

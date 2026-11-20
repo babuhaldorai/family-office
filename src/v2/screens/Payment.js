@@ -1,7 +1,7 @@
 // One form for every payment, in or out. The middle part changes with who the
 // payment is with; the bottom (amount, difference, how, who, when) is always
 // the same.
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useData } from '../data/DataContext';
 import { Page, Card, Row, Tag, Field, Num, Text, Select, Btn, Check, Muted, Chips, PayHow, Ask, askOp, back, go, useForm, href } from '../ui/kit';
 import { DIFF_REASONS, KINDS, settledCash } from '../core/books';
@@ -18,7 +18,9 @@ const typeOfKind = (k) => (k === 'tea_sale' ? 'agent' : k === 'wages' || k === '
     : k === 'work' || k === 'stock' || k === 'equipment' ? 'bill' : 'other');
 
 export default function Payment({ query }) {
-  const { books, today, can, run, user } = useData();
+  const { books, today, can, run, user, demo, say } = useData();
+  const fileRef = useRef(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
   const [ask, setAsk] = useState(null);
   const existing = query.entry ? books.entryById.get(query.entry) : null;
   const firstTenancy = books.tenancies.find((t) => t.isActive);
@@ -29,7 +31,7 @@ export default function Payment({ query }) {
         ...existing, type: typeOfKind(existing.kind), amount: String(existing.amount), touched: true,
         rate: existing.rate != null ? String(existing.rate) : '', advanceRecovered: existing.advanceRecovered ? String(existing.advanceRecovered) : '',
         deliveryIds: existing.deliveryIds || [], months: existing.months || [], billId: existing.workId ? 'w-' + existing.workId : existing.stockId ? 's-' + existing.stockId : existing.equipmentId ? 'q-' + existing.equipmentId : '',
-        diffReason: existing.diffReason || '', diffComment: existing.diffComment || '', note: existing.note || '',
+        diffReason: existing.diffReason || '', diffComment: existing.diffComment || '', note: existing.note || '', photoPath: existing.photoPath || '',
       };
     }
     const type = query.type || 'agent';
@@ -38,7 +40,7 @@ export default function Payment({ query }) {
       type, kind: query.kind || (type === 'agent' ? 'tea_sale' : type === 'worker' ? 'wages' : type === 'tenant' ? 'rent' : type === 'other' ? 'misc' : ''),
       partyId: query.party || '', tenancyId, date: today, amount: '', touched: false, rate: '', advanceRecovered: null,
       deliveryIds: null, months: null, billId: query.bill || '', mode: 'cash', by: books.handlers[0] || '',
-      diffReason: '', diffComment: '', note: '', category: '', fieldId: '', propertyId: query.property || '', equipmentId: '', leaseId: '', business: 'tea', oneTime: false,
+      diffReason: '', diffComment: '', note: '', category: '', fieldId: '', propertyId: query.property || '', equipmentId: '', leaseId: '', business: 'tea', oneTime: false, photoPath: '',
     };
   });
 
@@ -129,6 +131,22 @@ export default function Payment({ query }) {
   const remove = () => {
     if (!window.confirm('Move this payment to the recycle bin?' + (existing.kind === 'tea_sale' && (existing.deliveryIds || []).length ? '\n\nIts deliveries will go back to "rate not known".' : ''))) return;
     if (run(removeEntryOps(existing.id, books), 'Moved to the recycle bin')) back('/reports/entries');
+  };
+  // ── optional photo (receipt, signed slip, UPI screen), kept for reference ──
+  const onPhoto = async (file) => {
+    if (!file) return;
+    setPhotoBusy(true);
+    try {
+      const svc = await import('../data/slipService');
+      const path = await svc.keepPhoto(await svc.shrink(file), f.date, 'payments');
+      set('photoPath', path);
+      say(existing ? 'Photo attached. Press Save changes to keep it.' : 'Photo attached');
+    } catch (e) { say('The photo could not be stored: ' + (e.code || e.message || 'unknown error'), true); }
+    setPhotoBusy(false);
+  };
+  const viewPhoto = async () => {
+    try { const svc = await import('../data/slipService'); window.open(await svc.photoUrl(f.photoPath), '_blank', 'noopener'); }
+    catch (e) { say('The photo could not be opened: ' + (e.code || e.message), true); }
   };
   const reset = (patch) => setAll((x) => ({ ...x, amount: '', touched: false, deliveryIds: null, months: null, advanceRecovered: null, rate: '', diffReason: '', diffComment: '', ...patch }));
 
@@ -244,6 +262,13 @@ export default function Payment({ query }) {
       <Card>
         <PayHow value={{ mode: f.mode, by: f.by, date: f.date }} onChange={(v) => setAll((x) => ({ ...x, ...v }))} handlers={books.handlers} verb={verb} />
         <Field label="Note (optional)"><Text value={f.note} onChange={(v) => set('note', v)} /></Field>
+      </Card>
+
+      <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} aria-label="Photo for this payment" onChange={(e) => { onPhoto(e.target.files[0]); e.target.value = ''; }} />
+      <Card title="Photo, kept for reference (optional)">
+        {f.photoPath ? <Row left="A photo is attached" right={<span><button type="button" className="v2-link" onClick={viewPhoto}>View</button>{' · '}<button type="button" className="v2-link" onClick={() => set('photoPath', '')}>Remove</button></span>} />
+          : <Muted>{f.type === 'agent' ? 'For example the agent\'s bill or the payment screen.' : f.type === 'worker' ? 'For example the signed wage slip or the payment screen.' : 'For example the receipt or the payment screen.'} Nothing is read from it.</Muted>}
+        <Btn kind="sec" disabled={photoBusy} onClick={() => (demo ? say('Photos cannot be stored on sample data.', true) : fileRef.current.click())}>{photoBusy ? 'Storing the photo…' : f.photoPath ? 'Replace the photo' : 'Take or choose a photo'}</Btn>
       </Card>
 
       {existing && books.notes.filter((n) => n.kind === 'todo' && !n.done && n.link === `/pay?entry=${existing.id}`).map((n) => (

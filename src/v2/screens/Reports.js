@@ -439,7 +439,7 @@ function Entries({ period, query }) {
               ? { key: 'n' + r.id, id: r.id, type: r.type, noDelete: !can.harvest, deleteLabel: 'Undo no harvest', cells: [fmtDate(r.date), '', 'No harvest that day', '', '', '', r.n.by || '', <Tag kind="n">No harvest</Tag>, '', ''] }
               : r.type === 'harvest'
               ? { key: 'h' + r.id, id: r.id, type: r.type, noDelete: !can.harvest, deleteLabel: 'Delete this harvest', cells: [fmtDate(r.date), r.d.agentName, harvestFor(r.d), '', '', '', '', <Tag kind="n">Harvest</Tag>, harvestNote(r.d), ''] }
-              : { key: r.id, id: r.id, type: r.type, noDelete: !can.write, deleteLabel: 'Delete this payment', cells: [fmtDate(r.date), r.e.party, r.e.forText, r.e.dir === 'in' ? inr(r.e.amount) : '', r.e.dir === 'out' ? inr(r.e.amount) : '', MODE_LABEL[r.e.mode] || '', r.e.by || '', diffTag(r.e), [r.e.diffComment, r.e.note].filter(Boolean).join(' · '), inr(running.get(r.id))] }))}
+              : { key: r.id, id: r.id, type: r.type, noDelete: !can.write, deleteLabel: 'Delete this payment', cells: [fmtDate(r.date), r.e.party, r.e.forText, r.e.dir === 'in' ? inr(r.e.amount) : '', r.e.dir === 'out' ? inr(r.e.amount) : '', MODE_LABEL[r.e.mode] || '', r.e.by || '', diffTag(r.e), [r.e.photoPath ? '📷 photo' : '', r.e.diffComment, r.e.note].filter(Boolean).join(' · '), inr(running.get(r.id))] }))}
             foot={['Total', count, '', inr(totalIn), inr(totalOut), '', '', '', '', inr(totalIn - totalOut)]} />
           <Muted>The running total starts at zero on the first day shown and counts payments only. It is not a bank or cash balance.</Muted>
         </Card>
@@ -456,7 +456,7 @@ function Entries({ period, query }) {
           ) : (
             <Row key={r.id} top onClick={can.write ? () => open(r) : undefined} onDelete={can.write ? () => remove(r) : undefined} deleteLabel="Delete this payment"
               left={<><strong>{r.e.party}</strong> · {r.e.forText}</>}
-              sub={<>{[fmtDate(r.date, { year: false }), MODE_LABEL[r.e.mode], r.e.by, r.e.diffComment || r.e.note].filter(Boolean).join(' · ')}{diffTag(r.e) && <div style={{ marginTop: 4 }}>{diffTag(r.e)}</div>}</>}
+              sub={<>{[fmtDate(r.date, { year: false }), MODE_LABEL[r.e.mode], r.e.by, r.e.photoPath ? '📷 photo' : '', r.e.diffComment || r.e.note].filter(Boolean).join(' · ')}{diffTag(r.e) && <div style={{ marginTop: 4 }}>{diffTag(r.e)}</div>}</>}
               right={<span className={r.e.dir === 'in' ? 'v2-green' : ''} style={{ fontWeight: 600 }}>{inr(r.e.signed, { sign: true })}</span>} />
           )))}
         </Card>

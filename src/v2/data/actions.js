@@ -116,6 +116,7 @@ export function paymentOps(form, books) {
     tenancyId: form.tenancyId || undefined, months: form.kind === 'rent' ? form.months || [] : undefined,
     workId: form.workId || undefined, stockId: form.stockId || undefined, equipmentId: form.equipmentId || undefined,
     leaseId: form.leaseId || undefined, deliveryId: form.deliveryId || undefined, oneTime: form.oneTime || undefined,
+    photoPath: form.photoPath || undefined,
     imported: existing?.imported, createdAt: existing?.createdAt,
   };
   if ((doc.kind === 'tea_sale' || doc.kind === 'wages' || doc.kind === 'advance') && !doc.partyId) return { error: 'Choose the person.' };

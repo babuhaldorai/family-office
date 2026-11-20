@@ -25,6 +25,16 @@ service firebase.storage {
       allow delete: if request.auth != null && role() == 'admin';
       allow update: if false;
     }
+    // Photos kept with a payment (agent or worker receipt). Payments are money,
+    // so Data entry cannot add or see them, matching the database rules.
+    match /payments/{month}/{file} {
+      allow create: if request.auth != null && role() in ['admin', 'manager']
+                    && request.resource.size < 3 * 1024 * 1024
+                    && request.resource.contentType == 'image/jpeg';
+      allow read: if request.auth != null && role() in ['admin', 'manager', 'viewer'];
+      allow delete: if request.auth != null && role() == 'admin';
+      allow update: if false;
+    }
     match /{allPaths=**} {
       allow read, write: if false;
     }
