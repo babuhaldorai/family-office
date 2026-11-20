@@ -440,19 +440,43 @@ export function buildBooks(raw, today) {
     rents.forEach((r) => { if (monthKey(r.from) <= mk) amt = num(r.amount); });
     return amt;
   };
+  // Rent recorded against a property but not a tenant (old-data import could not
+  // match one) belongs to the tenancy that covers its date, or the property's only one.
+  const isoDay = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''));
+  const tenancyForRent = (e) => {
+    const list = tenanciesBase.filter((t) => t.propertyId === e.propertyId);
+    return list.find((t) => (!isoDay(t.start) || t.start <= e.date) && (!t.end || t.end >= e.date))
+      || (list.length === 1 ? list[0] : null) || list.find((t) => t.active !== false) || null;
+  };
+  const looseRent = new Map();
+  entriesBy((e) => e.kind === 'rent' && !e.tenancyId && e.propertyId).forEach((e) => {
+    const t = tenancyForRent(e);
+    if (t) looseRent.set(t.id, [...(looseRent.get(t.id) || []), e]);
+  });
   const tenancies = tenanciesBase.map((t) => {
     const dueDay = Math.min(28, Math.max(1, num(t.dueDay) || 1));
-    const rentEntries = entriesBy((e) => e.kind === 'rent' && e.tenancyId === t.id).slice().sort(byDateAsc);
-    const startMk = monthKey(t.start || today);
+    const rentEntries = [...entriesBy((e) => e.kind === 'rent' && e.tenancyId === t.id), ...(looseRent.get(t.id) || [])].sort(byDateAsc);
+    // Months run from the move-in date to today. A month before the move-in date
+    // (or any month, when the move-in date is missing or after today) is still
+    // listed if rent was recorded for it, so no payment is hidden; such months
+    // are not counted as owed unless something was paid for them.
+    const start = isoDay(t.start) ? t.start : '';
+    const startMk = monthKey(start || today);
     const lastMk = monthKey(t.end && t.end < today ? t.end : today);
-    const months = (startMk <= lastMk ? monthsFrom(startMk, lastMk) : []).map((mk) => {
+    const paidMks = new Set();
+    rentEntries.forEach((e) => { const ms = (e.months || []).filter((m) => /^\d{4}-\d{2}$/.test(m)); (ms.length ? ms : [monthKey(e.date)]).forEach((m) => paidMks.add(m)); });
+    const mkSet = new Set(startMk <= lastMk ? monthsFrom(startMk, lastMk) : []);
+    paidMks.forEach((m) => { if (m <= lastMk || mkSet.size === 0) mkSet.add(m); });
+    const months = [...mkSet].sort().map((mk) => {
       const dueDate = `${mk}-${String(dueDay).padStart(2, '0')}`;
-      return { mk, rent: rentOn(t, mk), dueDate, isDue: dueDate <= today, paid: 0, paidOn: null };
+      const charged = (mk >= startMk && mk <= lastMk) || paidMks.has(mk);
+      return { mk, rent: rentOn(t, mk), dueDate, isDue: charged && dueDate <= today, paid: 0, paidOn: null };
     });
     const byMk = new Map(months.map((m) => [m.mk, m]));
     let pool = 0;
     rentEntries.forEach((e) => {
-      const ms = (e.months || []).filter((m) => byMk.has(m));
+      // a payment with a house but no tenant counts for the month it was paid in
+      const ms = (e.tenancyId ? e.months || [] : (e.months || []).length ? e.months : [monthKey(e.date)]).filter((m) => byMk.has(m));
       const amt = settledCash(e);
       if (!ms.length) { pool = r2(pool + amt); return; }
       const total = sum(ms, (m) => byMk.get(m).rent) || ms.length;
@@ -482,6 +506,7 @@ export function buildBooks(raw, today) {
       balance: sum(dueMonths, (m) => Math.max(0, r2(m.rent - m.paid))), expected, settled,
       advanceHeld: r2(advIn - advOut), advanceRecorded: advIn > 0,
       isActive: t.active !== false && (!t.end || t.end >= today),
+      startProblem: !isoDay(t.start) ? 'missing' : t.start > today ? 'future' : rentEntries.some((e) => e.date < t.start) ? 'after-payments' : '',
     };
   });
 
@@ -667,6 +692,7 @@ export function buildBooks(raw, today) {
   if (wagesDue.length) attention.push({ id: 'wages', type: 'workers', title: 'Wages due', sub: `${wagesDue.length} ${wagesDue.length === 1 ? 'worker' : 'workers'}`, amount: sum(wagesDue, (w) => w.due), sort: 3 });
   tenancies.filter((t) => t.isActive).forEach((t) => {
     if (t.unpaidMonths.length) attention.push({ id: 'rent-' + t.id, type: 'tenancy', tenancyId: t.id, partyId: t.tenantId, title: 'Rent not received', sub: `${t.propertyName} · ${t.unpaidMonths.map((m) => fmtMonth(m.mk, { year: false })).join(', ')}`, amount: sum(t.unpaidMonths, (m) => r2(m.rent - m.paid)), sort: 4 });
+    if (t.startProblem) attention.push({ id: 'tstart-' + t.id, type: 'property', propertyId: t.propertyId, title: 'Check the move-in date', sub: `${t.propertyName} · ${t.tenantName} · ${t.startProblem === 'missing' ? 'no move-in date' : t.startProblem === 'future' ? `move-in date ${fmtDate(t.start)} is after today` : `rent was recorded before the move-in date ${fmtDate(t.start)}`}`, tag: 'View', sort: 6 });
     if (t.end && daysBetween(today, t.end) >= 0 && daysBetween(today, t.end) <= 30) attention.push({ id: 'tend-' + t.id, type: 'property', propertyId: t.propertyId, title: `Rental agreement ending in ${daysBetween(today, t.end)} days`, sub: `${t.propertyName} · ${t.tenantName}`, tag: 'View', sort: 6 });
   });
   leases.forEach((l) => {

@@ -48,6 +48,7 @@ export function Property({ id }) {
   const del = useDelete();
   const p = books.propertyById.get(id);
   const ps = usePeriod(today, 'year');
+  const [allMonths, setAllMonths] = useState(false);
   const [editing, setEditing] = useState(null);
   const tenancies = books.tenancies.filter((t) => t.propertyId === id);
   const t = tenancies.find((x) => x.isActive) || null;
@@ -85,12 +86,14 @@ export function Property({ id }) {
             {t.note && <Muted>{t.note}</Muted>}
             {can.write && <button type="button" className="v2-link" onClick={() => setEditing(t.id)}>Change tenant terms or raise the rent</button>}
           </Card>
-          <Card title="Rent received, last 12 months">
+          <Card title={allMonths || t.months.length <= 12 ? 'Rent received, every month' : 'Rent received, last 12 months'}>
             <div className="v2-months">
-              {t.months.slice(-12).map((m) => (
-                <div key={m.mk} className="v2-month"><strong>{fmtMonth(m.mk, { year: false })}</strong><Tag kind={MONTH_TAG[m.status][0]}>{MONTH_TAG[m.status][1]}</Tag></div>
+              {(allMonths ? t.months : t.months.slice(-12)).map((m) => (
+                <div key={m.mk} className="v2-month"><strong>{fmtMonth(m.mk, { year: allMonths || t.months.length > 12 ? m.mk.slice(0, 4) !== today.slice(0, 4) : false })}</strong><Tag kind={MONTH_TAG[m.status][0]}>{MONTH_TAG[m.status][1]}</Tag></div>
               ))}
             </div>
+            {t.months.length > 12 && <button type="button" className="v2-link" onClick={() => setAllMonths((x) => !x)}>{allMonths ? 'Show the last 12 months' : `Show all ${t.months.length} months`}</button>}
+            {t.startProblem && <Muted>{t.startProblem === 'missing' ? 'No move-in date is saved' : t.startProblem === 'future' ? `The move-in date (${fmtDate(t.start)}) is after today` : `Rent was recorded before the move-in date (${fmtDate(t.start)})`}. Months with rent recorded are still shown. Use "Change tenant terms" below to correct the date.</Muted>}
             {t.balance > 0.5 && <Row left={<strong>Rent due</strong>} right={<Tag><Money v={t.balance} /></Tag>} />}
             {can.write && <a className="v2-btn" href={href('/pay', { type: 'tenant', tenancy: t.id })}>Record rent received</a>}
             {reminder && <a className="v2-btn sec" target="_blank" rel="noreferrer" href={`https://wa.me/${phone.length === 10 ? '91' + phone : phone}?text=${encodeURIComponent(reminder)}`}>Remind on WhatsApp</a>}

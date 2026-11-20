@@ -54,6 +54,9 @@ Sample tests: `smoke-sample.js`, `e2e-sample.js` to `e2e-sample-5.js`.
 - Reading numbers from slip photos was removed (it would cost money). Photos are only stored.
 - Every payment (agent, worker and the rest) can carry one optional photo (`photoPath`, stored under
   `payments/` in the bucket). Only Owner and manager can add it; viewers can see it; Data entry cannot.
+- Rent months on a house run from the move-in date to today, plus any month with rent recorded
+  (so no payment is hidden when the move-in date is missing, after today, or later than payments).
+  Such tenancies are flagged "Check the move-in date" on Home.
 - AI summaries: off by default; the Owner switches them on and picks who may use them; at most 2 a day.
 - Backups: every night, only if something changed, to the storage bucket and a private GitHub repo.
 - Reminder emails: per address, each person gets one combined email (rent not logged, their action
@@ -63,7 +66,8 @@ Sample tests: `smoke-sample.js`, `e2e-sample.js` to `e2e-sample-5.js`.
 - Staging holds the records the owner wants to keep. Next step is going live: see `PRODUCTION.md`.
   The owner is taking two backups first (production old app, and staging) and will say "go".
 - Working on staging: GitHub backup, reminder emails.
-- Not confirmed yet: payment photo upload on the real staging site (sample mode cannot store photos,
+- Not confirmed yet: rentals fix on the real staging data (all 3 houses should now list their months;
+  any with a wrong move-in date show "Check the move-in date"), payment photo upload on the real staging site (sample mode cannot store photos,
   and the storage rules could not be checked on the emulator in the cloud container),
   the iPhone status-bar fix (needs the app re-added to the home screen),
   phone sign-in through the site's own address, AI summaries with a real key.
