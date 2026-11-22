@@ -15,13 +15,13 @@ const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log(
 
   for (const tab of ['harvest', 'fields', 'people']) {
     await nav('/tea/' + tab);
-    assert(await page.getByRole('link', { name: '+ Agent payment' }).isVisible() && await page.getByRole('link', { name: '+ Pay a worker' }).isVisible(), `Tea → ${tab}: both payment buttons are at the top`);
+    assert(await page.getByRole('link', { name: '+ Agent pay' }).isVisible() && await page.getByRole('link', { name: '+ Worker pay' }).isVisible(), `Tea → ${tab}: both payment buttons are at the top`);
   }
-  await page.getByRole('link', { name: '+ Pay a worker' }).click(); await page.waitForTimeout(300);
+  await page.getByRole('link', { name: '+ Worker pay' }).click(); await page.waitForTimeout(300);
   assert(/Record a payment/.test(await page.locator('.v2-h').innerText()) && /Earned and not yet paid/.test(await text()), '+ Pay a worker opens the wages form');
   await page.getByRole('link', { name: /Back/i }).first().click().catch(() => {});
   await nav('/tea/harvest');
-  await page.getByRole('link', { name: '+ Agent payment' }).click(); await page.waitForTimeout(300);
+  await page.getByRole('link', { name: '+ Agent pay' }).click(); await page.waitForTimeout(300);
   assert(/Which deliveries is this payment for/i.test(await text()), '+ Agent payment opens the agent form');
 
   await nav('/tea');

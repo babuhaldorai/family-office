@@ -26,14 +26,13 @@ describe('photos on payments and harvests', () => {
     expect(res.ops[0].data.photos.map((p) => p.path)).toEqual(['payments/2026-11/old.jpg']);
     expect('photoPath' in res.ops[0].data).toBe(false);
   });
-  test('the list badge shows how many and the India date of the last one', () => {
+  test('lists show only a camera when there is a photo', () => {
     expect(photoBadge({})).toBe('');
-    expect(photoBadge({ photos: [two[0]] })).toBe('📷 20 Nov');
-    expect(photoBadge({ photos: two })).toBe('📷 2 · last 22 Nov');
-    expect(photoBadge({ slipPath: 'slips/x.jpg' })).toBe('📷 photo');
-    // 22 Nov 09:40 UTC is 3:10 pm in India; 20:00 UTC on the 21st is already the 22nd there
+    expect(photoBadge({ photos: [two[0]] })).toBe('📷');
+    expect(photoBadge({ photos: two })).toBe('📷');
+    expect(photoBadge({ slipPath: 'slips/x.jpg' })).toBe('📷');
+    // 22 Nov 09:40 UTC is 3:10 pm in India (shown on the entry itself)
     expect(fmtMomentIST('2026-11-22T09:40:00.000Z')).toBe('22 Nov 2026, 3:10 pm');
-    expect(photoBadge({ photos: [{ path: 'x', at: '2026-11-21T20:00:00.000Z' }] })).toBe('📷 22 Nov');
   });
   test('a harvest keeps several slip photos', () => {
     const d = b.deliveries[b.deliveries.length - 1];

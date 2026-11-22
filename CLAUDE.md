@@ -54,7 +54,7 @@ Sample tests: `smoke-sample.js`, `e2e-sample.js` to `e2e-sample-6.js`.
 - Reading numbers from slip photos was removed (it would cost money). Photos are only stored.
 - Harvests and payments can carry several photos: `photos: [{ path, at, by }]` (`at` is the upload time;
   shown in India time). Older records with one `slipPath`/`photoPath` are read as the first photo
-  (`core/photos.js`) and rewritten as `photos` on the next save. Lists show "📷 N · last <date>".
+  (`core/photos.js`) and rewritten as `photos` on the next save. Lists show only a 📷 icon (owner's choice); the dates are listed inside the entry.
   Payment photos are stored under
   `payments/` in the bucket. Only Owner and manager can add it; viewers can see it; Data entry cannot.
   storage.rules is published by hand in the Firebase console; until the `payments/` rule is published,
@@ -67,7 +67,7 @@ Sample tests: `smoke-sample.js`, `e2e-sample.js` to `e2e-sample-6.js`.
 - Harvest form has "To do from this harvest": each to-do is a `fo_notes` todo for a chosen person
   (default: the person picked on Home, else the first handler), naming field, day and optional worker,
   linked to `/harvest/<id>`; open ones show on that harvest with Done.
-- Tea has "+ Agent payment" and "+ Pay a worker" at the top of every tab, and a Payments tab (who is
+- Tea header has three small buttons side by side: "+ Harvest", "+ Agent pay", "+ Worker pay", and a Payments tab (who is
   waiting, one tap to pay, list of agent/worker payments). Payments opened from Tea (`from=tea`)
   return to Tea → Payments after saving.
 - AI summaries: off by default; the Owner switches them on and picks who may use them; at most 2 a day.

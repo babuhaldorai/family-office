@@ -16,13 +16,11 @@ export default function Tea({ tab = 'harvest' }) {
   const { can } = useData();
   const tabs = can.money ? TABS : TABS.filter(([k]) => k === 'harvest' || k === 'fields');
   return (
-    <Page title="Tea" right={can.harvest && <a className="v2-btn sm" href={href('/harvest')}>+ Harvest day</a>}>
-      {can.write && (
-        <div style={{ display: 'flex', gap: 8 }}>
-          <a className="v2-btn sec sm" style={{ flex: 1 }} href={href('/pay', { type: 'agent', from: 'tea' })}>+ Agent payment</a>
-          <a className="v2-btn sec sm" style={{ flex: 1 }} href={href('/pay', { type: 'worker', kind: 'wages', from: 'tea' })}>+ Pay a worker</a>
-        </div>
-      )}
+    <Page title="Tea" right={<>
+      {can.harvest && <a className="v2-btn sm" href={href('/harvest')}>+ Harvest</a>}
+      {can.write && <a className="v2-btn sec sm" href={href('/pay', { type: 'agent', from: 'tea' })}>+ Agent pay</a>}
+      {can.write && <a className="v2-btn sec sm" href={href('/pay', { type: 'worker', kind: 'wages', from: 'tea' })}>+ Worker pay</a>}
+    </>}>
       <Tabs tabs={tabs} value={tab} onChange={(t) => go('/tea/' + t)} />
       {tab === 'harvest' && <HarvestLog />}
       {tab === 'payments' && can.money && <TeaPayments />}

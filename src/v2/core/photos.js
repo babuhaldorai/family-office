@@ -1,7 +1,6 @@
 // Photos kept with a harvest (slips) or a payment (receipts). A record holds a
 // list `photos: [{ path, at, by }]`; records saved before that hold one
 // `slipPath` or `photoPath`, which is read as the first photo with no time.
-import { dayIST, fmtDate } from './util';
 
 export function photosOf(rec) {
   const list = (rec?.photos || []).filter((p) => p && p.path);
@@ -10,14 +9,8 @@ export function photosOf(rec) {
   return list;
 }
 
-// "📷 22 Nov" or "📷 3 · last 22 Nov" for lists; '' when there is no photo.
-export function photoBadge(rec) {
-  const list = photosOf(rec);
-  if (!list.length) return '';
-  const last = list.map((p) => p.at).filter(Boolean).sort().pop();
-  const when = last ? fmtDate(dayIST(last), { year: false }) : '';
-  return list.length === 1 ? `📷 ${when || 'photo'}` : `📷 ${list.length}${when ? ' · last ' + when : ''}`;
-}
+// Lists show only a camera when an entry has a photo; the dates are on the entry itself.
+export const photoBadge = (rec) => (photosOf(rec).length ? '📷' : '');
 
 // what is saved: the list, or nothing at all when it is empty
 export const photosToSave = (list) => {

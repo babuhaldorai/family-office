@@ -70,15 +70,17 @@ const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log(
   await page.locator('.v2-row', { hasText: 'Ask Mom about the bags' }).getByText('Done').click(); await page.waitForTimeout(300);
   assert(!/Ask Mom about the bags/.test(await text()), 'Done there marks it done');
 
-  // 📷 on entries that have photos, with how many and when the last was added
+  // 📷 on entries that have photos
   await nav('/tea');
-  assert(/Tue 10 Nov · [^\n]*📷 2 · last 11 Nov/.test(await text()), 'harvest log shows 📷 2 · last 11 Nov on the harvest with two slip photos');
+  assert(/Tue 10 Nov · [^\n]*📷/.test(await text()), 'harvest log shows 📷 on the harvest with slip photos');
   await nav('/harvest/d2');
   t = await text();
   assert(/PHOTOS OF THE SLIP, KEPT FOR REFERENCE · 2/i.test(t) && /Photo 1\s*Added 10 Nov 2026, 6:00 pm by Ragu/.test(t) && /Photo 2\s*Added 11 Nov 2026, 9:30 am by Ragu/.test(t), 'the harvest lists each photo with the India date and time it was added');
   await page.locator('.v2-row', { hasText: 'Photo 2' }).getByRole('button', { name: 'Remove' }).click(); await page.waitForTimeout(200);
   await page.getByRole('button', { name: 'Save changes' }).click(); await page.waitForTimeout(400);
-  assert(/Tue 10 Nov · [^\n]*📷 10 Nov/.test(await text()), 'removing one and saving leaves one photo');
+  assert(/Tue 10 Nov · [^\n]*📷/.test(await text()), 'removing one and saving still shows 📷');
+  await nav('/harvest/d2');
+  assert(/KEPT FOR REFERENCE · 1/i.test(await text()), 'and the harvest now has one photo');
 
   await browser.close(); console.log('ALL PASSED');
 })().catch((e) => { console.log(e.message.slice(0, 700)); process.exit(1); });
