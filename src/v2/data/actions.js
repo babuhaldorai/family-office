@@ -2,6 +2,7 @@
 // same form and books always give the same changes, and one user action is
 // always saved as one all-or-nothing batch (for example an agent payment and
 // the rate it puts on its deliveries).
+import { photosOf, photosToSave } from '../core/photos';
 import { r2, num, uid, sum } from '../core/util';
 import { kgRateFor, workCost } from '../core/books';
 
@@ -63,7 +64,7 @@ export function deliveryOps(form, books) {
     rate: rateGiven ? num(form.rate) : null,
     rateBy: rateGiven && existing && existing.rate === num(form.rate) ? existing.rateBy || null : null,
     kgRates, dayWork, machine: !!form.machine, note: form.note || '',
-    dedBy, slipPath: form.slipPath || existing?.slipPath || undefined,
+    dedBy, photos: photosToSave(form.photos !== undefined ? form.photos : photosOf(existing)),
     createdAt: existing?.createdAt,
   };
   const ops = [set('deliveries', id, doc)];
@@ -116,7 +117,7 @@ export function paymentOps(form, books) {
     tenancyId: form.tenancyId || undefined, months: form.kind === 'rent' ? form.months || [] : undefined,
     workId: form.workId || undefined, stockId: form.stockId || undefined, equipmentId: form.equipmentId || undefined,
     leaseId: form.leaseId || undefined, deliveryId: form.deliveryId || undefined, oneTime: form.oneTime || undefined,
-    photoPath: form.photoPath || undefined,
+    photos: photosToSave(form.photos !== undefined ? form.photos : photosOf(existing)),
     imported: existing?.imported, createdAt: existing?.createdAt,
   };
   if ((doc.kind === 'tea_sale' || doc.kind === 'wages' || doc.kind === 'advance') && !doc.partyId) return { error: 'Choose the person.' };

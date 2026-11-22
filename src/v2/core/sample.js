@@ -88,7 +88,8 @@ export function sampleData(today = SAMPLE_TODAY) {
   // ── the week of 9–15 Nov 2026 ────────────────────────────────────────────
   deliveries.push(
     { id: 'd1', date: '2026-11-09', fieldId: 'f1', agentId: 'a1', bags: [{ kg: 50, workerId: 'w1' }, { kg: 40, workerId: 'w1' }, { kg: 50, workerId: 'w2' }], bagDed: 3.5, waterDed: 4, rate: 24.5, rateBy: 'sale-nov' },
-    { id: 'd2', date: '2026-11-10', fieldId: 'f2', agentId: 'a2', bags: [{ kg: 64, workerId: 'w3' }, { kg: 64, workerId: 'w2' }], bagDed: 3, waterDed: 3, rate: null },
+    { id: 'd2', date: '2026-11-10', fieldId: 'f2', agentId: 'a2', bags: [{ kg: 64, workerId: 'w3' }, { kg: 64, workerId: 'w2' }], bagDed: 3, waterDed: 3, rate: null,
+      photos: [{ path: 'slips/2026-11/sample-front.jpg', at: '2026-11-10T12:30:00.000Z', by: 'Ragu' }, { path: 'slips/2026-11/sample-back.jpg', at: '2026-11-11T04:00:00.000Z', by: 'Ragu' }] },
     { id: 'd3', date: '2026-11-11', fieldId: 'f2', agentId: 'a1', bags: [{ kg: 49, workerId: 'w3' }, { kg: 49, workerId: 'w1' }, { kg: 49, workerId: 'w3' }], bagDed: 3.5, waterDed: 4, rate: 24.5, rateBy: 'sale-nov' },
     { id: 'd4', date: '2026-11-12', fieldId: 'f1', agentId: 'a2', bags: [{ kg: 50, workerId: 'w2' }, { kg: 50, workerId: 'w1' }, { kg: 50, workerId: 'w3' }], bagDed: 3, waterDed: 4, rate: null },
     { id: 'd5', date: '2026-11-13', fieldId: 'f1', agentId: 'a1', bags: [{ kg: 50, workerId: 'w1' }, { kg: 50, workerId: 'w1' }, { kg: 50, workerId: 'w2' }], bagDed: 5, waterDed: 5, rate: 24.5, rateBy: 'sale-nov', rainMm: 12 },

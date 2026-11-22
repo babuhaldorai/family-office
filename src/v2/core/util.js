@@ -147,3 +147,11 @@ export function parseLatLon(text) {
   }
   return null;
 }
+
+// A moment (ISO time) as the India date and clock time it was, e.g. "22 Nov 2026, 3:40 pm".
+export const dayIST = (iso) => (iso ? todayIST(new Date(iso)) : '');
+export function fmtMomentIST(iso) {
+  if (!iso) return '';
+  const t = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(iso));
+  return `${fmtDate(dayIST(iso))}, ${t.toLowerCase()}`;
+}

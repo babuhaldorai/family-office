@@ -15,7 +15,7 @@ const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log(
 
   await nav('/pay?type=agent');
   let t = await text();
-  assert(/PHOTO, KEPT FOR REFERENCE \(OPTIONAL\)/i.test(t) && /agent's bill/.test(t), 'agent payment offers an optional photo');
+  assert(/PHOTOS, KEPT FOR REFERENCE \(OPTIONAL\)/i.test(t) && /agent's bill/.test(t), 'agent payment offers an optional photo');
   await page.getByRole('button', { name: 'Take or choose a photo' }).click(); await page.waitForTimeout(200);
   assert(/Photos cannot be stored on sample data/.test(await page.locator('body').innerText()), 'sample mode says photos are not stored');
 
@@ -40,9 +40,45 @@ const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log(
   await nav('/pay?type=worker');
   await page.getByRole('button', { name: 'Give an advance' }).click();
   t = await text();
-  assert(/PHOTO, KEPT FOR REFERENCE \(OPTIONAL\)/i.test(t) && /signed wage slip/.test(t), 'worker payment offers an optional photo');
+  assert(/PHOTOS, KEPT FOR REFERENCE \(OPTIONAL\)/i.test(t) && /signed wage slip/.test(t), 'worker payment offers an optional photo');
   await page.getByLabel(/Amount actually paid/).fill('300');
   await page.getByRole('button', { name: 'Save payment' }).click(); await page.waitForTimeout(400);
   assert(/Payment saved/.test(await page.locator('body').innerText()), 'a payment saves without a photo');
+
+  // harvest: photos box, and to-dos for yourself or someone else
+  await nav('/harvest');
+  t = await text();
+  assert(/PHOTOS OF THE SLIP/i.test(t) && /more than one/.test(t), 'harvest form offers more than one slip photo');
+  await page.getByRole('button', { name: 'One for the whole delivery' }).click();
+  await page.getByLabel('Worker 1 bag 1 kg').fill('40');
+  await page.getByLabel('Worker 1 name').selectOption({ label: 'Lakshmi' });
+  await page.getByRole('button', { name: '+ Add a to-do' }).click();
+  await page.getByRole('button', { name: 'Check the deduction' }).click();
+  await page.getByLabel('To do 1 worker').selectOption({ label: 'Lakshmi' });
+  await page.getByRole('button', { name: '+ Add a to-do' }).click();
+  await page.getByLabel('To do 2', { exact: true }).fill('Ask Mom about the bags');
+  await page.getByLabel('To do 2 for').selectOption({ label: 'Mom' });
+  await page.getByRole('button', { name: 'Save harvest' }).click(); await page.waitForTimeout(400);
+  assert(/Harvest saved with 2 to-dos/.test(await page.locator('body').innerText()), 'harvest saves with its two to-dos');
+  await nav('/');
+  t = await text();
+  assert(/Check the deduction\s*Harvest · [^·]+ · \w{3} \d+ \w{3} · Lakshmi · For Me/.test(t), 'Home lists the to-do for me with the field, day and worker');
+  assert(/Ask Mom about the bags\s*Harvest · [^\n]* · For Mom/.test(t), 'and the one for Mom');
+  await page.locator('.v2-row', { hasText: 'Check the deduction' }).getByText('Open').click(); await page.waitForTimeout(400);
+  t = await text();
+  assert(/Edit harvest/.test(await page.locator('.v2-h').innerText()) && /TO DO FROM THIS HARVEST[\s\S]*Check the deduction/i.test(t), 'Open goes to the harvest, which shows its open to-dos');
+  await page.locator('.v2-row', { hasText: 'Ask Mom about the bags' }).getByText('Done').click(); await page.waitForTimeout(300);
+  assert(!/Ask Mom about the bags/.test(await text()), 'Done there marks it done');
+
+  // 📷 on entries that have photos, with how many and when the last was added
+  await nav('/tea');
+  assert(/Tue 10 Nov · [^\n]*📷 2 · last 11 Nov/.test(await text()), 'harvest log shows 📷 2 · last 11 Nov on the harvest with two slip photos');
+  await nav('/harvest/d2');
+  t = await text();
+  assert(/PHOTOS OF THE SLIP, KEPT FOR REFERENCE · 2/i.test(t) && /Photo 1\s*Added 10 Nov 2026, 6:00 pm by Ragu/.test(t) && /Photo 2\s*Added 11 Nov 2026, 9:30 am by Ragu/.test(t), 'the harvest lists each photo with the India date and time it was added');
+  await page.locator('.v2-row', { hasText: 'Photo 2' }).getByRole('button', { name: 'Remove' }).click(); await page.waitForTimeout(200);
+  await page.getByRole('button', { name: 'Save changes' }).click(); await page.waitForTimeout(400);
+  assert(/Tue 10 Nov · [^\n]*📷 10 Nov/.test(await text()), 'removing one and saving leaves one photo');
+
   await browser.close(); console.log('ALL PASSED');
 })().catch((e) => { console.log(e.message.slice(0, 700)); process.exit(1); });

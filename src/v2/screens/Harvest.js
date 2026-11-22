@@ -4,7 +4,10 @@ import { Page, Card, Row, Tag, Field, Num, Text, Select, DateField, Btn, Check, 
 import { computeDelivery, kgRateFor, MODES, agentForField } from '../core/books';
 import { deliveryOps, removeDeliveryOps } from '../data/actions';
 import { rainRecord } from '../data/weather';
-import { inr, num, sum, addDays, fmtDate, r2 } from '../core/util';
+import { inr, num, sum, addDays, fmtDate, r2, uid } from '../core/util';
+import Photos from '../ui/Photos';
+import { photosOf } from '../core/photos';
+import { harvestTodoOps } from '../core/todos';
 
 // The form is laid out like the paper slip: one block per worker with their
 // bag weights and, right underneath, the deduction for that worker.
@@ -31,8 +34,10 @@ function groupsFrom(existing) {
   });
 }
 
+const TODO_IDEAS = ['Pay wages', 'Check the deduction', 'Get the rate from the agent', 'Buy bags', 'Manure due', 'Weeding or pruning needed', 'Talk to the worker'];
+
 export default function Harvest({ id, query }) {
-  const { books, today, can, run, say, demo } = useData();
+  const { books, today, can, run, say, user } = useData();
   const existing = id ? books.deliveryById.get(id) : null;
   const workers = books.people.filter((p) => p.kind === 'worker' && (p.active !== false || (existing && existing.workers.some((w) => w.workerId === p.id))));
   const agents = books.people.filter((p) => p.kind === 'agent' && (p.active !== false || existing?.agentId === p.id));
@@ -49,21 +54,19 @@ export default function Harvest({ id, query }) {
     otherDed: existing.otherDed ? String(existing.otherDed) : '', dedNote: existing.dedNote || '',
     rainMm: existing.rainMm != null ? String(existing.rainMm) : '', rainSource: 'entered',
     rate: existing.rate != null ? String(existing.rate) : '', dayWork: (existing.dayWork || []).map((w) => ({ ...w, days: String(w.days), dayRate: String(w.dayRate) })),
-    machine: !!existing.machine, note: existing.note || '', slipPath: existing.slipPath || '',
+    machine: !!existing.machine, note: existing.note || '', photos: photosOf(existing), todos: [],
     extras: books.entries.filter((e) => e.deliveryId === existing.id && e.kind === 'misc').map((e) => ({ id: e.id, category: e.category, amount: String(e.amount), mode: e.mode, by: e.by })),
   } : {
     date: query.date || today, fieldId: last?.fieldId || fields[0]?.id || '',
     agentId: agentForField(books.fieldById.get(last?.fieldId || fields[0]?.id), query.date || today) || last?.agentId || agents[0]?.id || '',
     groups: [blankGroup(workers[0]?.id)], dedMode: lastPerWorker ? 'worker' : 'whole', bagDed: '', waterDed: '', otherDed: '', dedNote: '',
-    rainMm: '', rainSource: '', rate: '', dayWork: [], machine: false, note: '', slipPath: '', extras: [],
+    rainMm: '', rainSource: '', rate: '', dayWork: [], machine: false, note: '', photos: [], todos: [], extras: [],
   });
   const [more, setMore] = useState(!!(existing && (existing.rate != null || existing.note || existing.machine)));
   // the field's usual agent is filled in until the agent is chosen by hand
   const [agentTouched, setAgentTouched] = useState(!!existing);
   const usualAgent = agentForField(books.fieldById.get(f.fieldId), f.date);
   useEffect(() => { if (!agentTouched && usualAgent && usualAgent !== f.agentId) set('agentId', usualAgent); }, [usualAgent, agentTouched]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [photoBusy, setPhotoBusy] = useState(false);
-  const fileRef = useRef(null);
   const refs = useRef({});
   const focusNext = useRef(null);
   useEffect(() => { if (focusNext.current) { refs.current[focusNext.current]?.focus(); focusNext.current = null; } });
@@ -131,23 +134,11 @@ export default function Harvest({ id, query }) {
     set('groups', (gs) => [...gs, blankGroup(next ? next.id : '')]);
   };
 
-  // ── photo of the slip, kept for reference only ───────────────────────────
-  const onPhoto = async (file) => {
-    if (!file) return;
-    setPhotoBusy(true);
-    try {
-      const svc = await import('../data/slipService');
-      const path = await svc.keepPhoto(await svc.shrink(file), f.date);
-      set('slipPath', path);
-      say(existing ? 'Photo attached. Press Save changes to keep it.' : 'Photo attached');
-    } catch (e) { const svc = await import('../data/slipService'); say('The photo could not be stored: ' + svc.photoError(e), true); }
-    setPhotoBusy(false);
-    if (fileRef.current) fileRef.current.value = '';
-  };
-  const viewPhoto = async () => {
-    try { const svc = await import('../data/slipService'); window.open(await svc.photoUrl(f.slipPath), '_blank', 'noopener'); }
-    catch (e) { say('The photo could not be opened: ' + (e.code || e.message), true); }
-  };
+  // ── action items from this harvest, for yourself or someone else ───────
+  const me = (() => { try { return window.localStorage.getItem('fo-me') || ''; } catch (e) { return ''; } })() || books.handlers[0] || '';
+  const openTodos = existing ? books.notes.filter((n) => n.kind === 'todo' && !n.done && n.link === `/harvest/${existing.id}`) : [];
+  const harvestWorkers = [...new Set(f.groups.map((g) => g.workerId).filter(Boolean))];
+  const setTodo = (i, patch) => set('todos', (l) => l.map((t, j) => (j === i ? { ...t, ...patch } : t)));
 
   const lease = f.fieldId && f.date ? books.activeLeaseOn(f.fieldId, f.date) : null;
   const linked = existing ? books.entries.find((e) => e.kind === 'tea_sale' && (e.deliveryIds || []).includes(existing.id)) : null;
@@ -162,7 +153,10 @@ export default function Harvest({ id, query }) {
     if (noNote) { say('Say what the "other" deduction was for.', true); return; }
     const res = deliveryOps({ ...f, bags: shaped.bags, bagDed: shaped.bagDed, waterDed: shaped.waterDed, otherDed: shaped.otherDed, dedNote: shaped.dedNote, dedBy: shaped.dedBy, dedDetail: shaped.dedDetail }, books);
     if (res.warn && !window.confirm(res.warn + '\n\nSave anyway?')) return;
-    if (run(res, existing ? 'Harvest updated' : 'Harvest saved')) { if (existing) back('/tea'); else go('/tea'); }
+    if (f.todos.some((t) => !t.text.trim() && t.workerId)) { say('Write what needs doing in each to-do, or remove it.', true); return; }
+    if (!res.error) res.ops.push(...harvestTodoOps(f.todos, { deliveryId: res.id, fieldId: f.fieldId, fieldName: books.fieldName(f.fieldId), date: f.date, nameOf: books.nameOf, by: user?.displayName || user?.email || '', today, newId: uid }));
+    const n = f.todos.filter((t) => t.text.trim()).length;
+    if (run(res, `${existing ? 'Harvest updated' : 'Harvest saved'}${n ? ` with ${n} to-do${n > 1 ? 's' : ''}` : ''}`)) { if (existing) back('/tea'); else go('/tea'); }
   };
   const remove = () => {
     if (!window.confirm('Move this harvest to the recycle bin?')) return;
@@ -284,10 +278,29 @@ export default function Harvest({ id, query }) {
         </Card>
       )}
 
-      <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} aria-label="Photo of the slip" onChange={(e) => onPhoto(e.target.files[0])} />
-      <Card title="Photo of the slip, kept for reference">
-        {f.slipPath ? <Row left="A photo is attached" right={<button type="button" className="v2-link" onClick={viewPhoto}>View</button>} /> : <Muted>Optional. The photo is stored with this harvest so you can check the paper later. Nothing is read from it.</Muted>}
-        <Btn kind="sec" disabled={photoBusy} onClick={() => (demo ? say('Photos cannot be stored on sample data.', true) : fileRef.current.click())}>{photoBusy ? 'Storing the photo…' : f.slipPath ? 'Replace the photo' : 'Take or choose a photo'}</Btn>
+      <Photos photos={f.photos} onChange={(v) => set('photos', v)} date={f.date} folder="slips" existing={!!existing}
+        title="Photos of the slip, kept for reference" hint="Optional. Stored with this harvest so you can check the paper later." />
+
+      <Card title="To do from this harvest">
+        {openTodos.map((n) => (
+          <Row key={n.id} top left={n.text} sub={[n.about, n.assignee ? `For ${n.assignee}` : ''].filter(Boolean).join(' · ')}
+            right={<Tag kind="g" onClick={() => run({ ops: [{ col: 'notes', id: n.id, patch: { done: true } }] }, 'Marked done')}>Done</Tag>} />
+        ))}
+        {f.todos.map((t, i) => (
+          <div key={i} className="v2-stack" style={{ gap: 8, borderTop: '1px solid var(--line2)', paddingTop: 8 }}>
+            <div className="v2-cols" style={{ alignItems: 'flex-end' }}>
+              <Field label={`To do ${i + 1}`}><Text value={t.text} onChange={(v) => setTodo(i, { text: v })} placeholder="What needs doing?" /></Field>
+              <button type="button" className="v2-x" style={{ flex: 'none' }} aria-label={`Remove to do ${i + 1}`} onClick={() => set('todos', (l) => l.filter((_, j) => j !== i))}>×</button>
+            </div>
+            <Chips small scroll label={`To do ${i + 1} ideas`} options={TODO_IDEAS.map((x) => [x, x])} value="" onChange={(v) => setTodo(i, { text: v })} />
+            <div className="v2-cols">
+              <Field label="For"><Select aria-label={`To do ${i + 1} for`} value={t.who} onChange={(v) => setTodo(i, { who: v })} options={books.handlers.map((h) => [h, h === me && !/^me$/i.test(h) ? `${h} (me)` : h])} /></Field>
+              <Field label="About a worker (optional)"><Select aria-label={`To do ${i + 1} worker`} value={t.workerId} onChange={(v) => setTodo(i, { workerId: v })} options={harvestWorkers.map((w) => [w, books.nameOf(w)])} placeholder="Not one worker" /></Field>
+            </div>
+          </div>
+        ))}
+        {!f.todos.length && !openTodos.length && <Muted>Something to follow up from this day? It goes on Home under “To do”, with the field{harvestWorkers.length ? ' and worker' : ''} and a link back here.</Muted>}
+        <button type="button" className="v2-link" onClick={() => set('todos', (l) => [...l, { text: '', who: me, workerId: '' }])}>+ Add a to-do</button>
       </Card>
 
       {!more && <button type="button" className="v2-link" onClick={() => setMore(true)}>More: note, cut with machine{can.money ? ', rate already known' : ''}</button>}

@@ -52,8 +52,11 @@ Sample tests: `smoke-sample.js`, `e2e-sample.js` to `e2e-sample-5.js`.
 - Manure: one purchase can hold several types sharing one transport charge; mixes record what went in
   and how many bags came out; one day's application can cover several fields at a rate per bag.
 - Reading numbers from slip photos was removed (it would cost money). Photos are only stored.
-- Every payment (agent, worker and the rest) can carry one optional photo (`photoPath`, stored under
-  `payments/` in the bucket). Only Owner and manager can add it; viewers can see it; Data entry cannot.
+- Harvests and payments can carry several photos: `photos: [{ path, at, by }]` (`at` is the upload time;
+  shown in India time). Older records with one `slipPath`/`photoPath` are read as the first photo
+  (`core/photos.js`) and rewritten as `photos` on the next save. Lists show "📷 N · last <date>".
+  Payment photos are stored under
+  `payments/` in the bucket. Only Owner and manager can add it; viewers can see it; Data entry cannot.
   storage.rules is published by hand in the Firebase console; until the `payments/` rule is published,
   the app keeps payment photos under `slips/<month>/payments-…` instead (already allowed).
 - Agent payment: the delivery list has a period filter (All, week, last week, month, last month,
@@ -61,6 +64,9 @@ Sample tests: `smoke-sample.js`, `e2e-sample.js` to `e2e-sample-5.js`.
 - Rent months on a house run from the move-in date to today, plus any month with rent recorded
   (so no payment is hidden when the move-in date is missing, after today, or later than payments).
   Such tenancies are flagged "Check the move-in date" on Home.
+- Harvest form has "To do from this harvest": each to-do is a `fo_notes` todo for a chosen person
+  (default: the person picked on Home, else the first handler), naming field, day and optional worker,
+  linked to `/harvest/<id>`; open ones show on that harvest with Done.
 - AI summaries: off by default; the Owner switches them on and picks who may use them; at most 2 a day.
 - Backups: every night, only if something changed, to the storage bucket and a private GitHub repo.
 - Reminder emails: per address, each person gets one combined email (rent not logged, their action

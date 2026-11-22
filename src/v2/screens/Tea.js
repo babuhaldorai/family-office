@@ -3,6 +3,7 @@ import { useData } from '../data/DataContext';
 import { Page, Card, Row, Tag, Money, Tabs, Table, Select, Muted, Btn, Field, Text, Num, DateField, PayHow, Check, useWide, go, href, download, useForm } from '../ui/kit';
 import { usePeriod, PeriodPicker } from '../ui/Period';
 import { inr, inRange, sum, fmtDate, num, r2, daysBetween } from '../core/util';
+import { photoBadge } from '../core/photos';
 import { DIFF_LABEL } from '../core/books';
 import { deliveriesCSV } from '../core/backup';
 import { equipmentOps, removeWithPayments } from '../data/actions';
@@ -38,8 +39,8 @@ function HarvestLog() {
   const rated = rows.filter((d) => d.value != null);
   const unratedKg = sum(rows.filter((d) => d.value == null), (d) => d.net);
   const head = can.money
-    ? ['Date', 'Field', 'Agent', { label: 'Weighed', r: 1 }, { label: 'Deducted', r: 1 }, { label: 'Net kg', r: 1 }, { label: 'Rate', r: 1 }, { label: 'From agent', r: 1 }, { label: 'Wages', r: 1 }, 'Status']
-    : ['Date', 'Field', 'Agent', { label: 'Weighed', r: 1 }, { label: 'Deducted', r: 1 }, { label: 'Net kg', r: 1 }, 'Picked by'];
+    ? ['Date', 'Field', 'Agent', { label: 'Weighed', r: 1 }, { label: 'Deducted', r: 1 }, { label: 'Net kg', r: 1 }, { label: 'Rate', r: 1 }, { label: 'From agent', r: 1 }, { label: 'Wages', r: 1 }, 'Status', 'Slip photo']
+    : ['Date', 'Field', 'Agent', { label: 'Weighed', r: 1 }, { label: 'Deducted', r: 1 }, { label: 'Net kg', r: 1 }, 'Picked by', 'Slip photo'];
   return (
     <>
       <PeriodPicker state={ps} />
@@ -59,18 +60,18 @@ function HarvestLog() {
             cells: can.money ? [
               fmtDate(d.date, { year: false, dow: true }), d.fieldName, d.agentName, d.gross.toFixed(1), d.ded.toFixed(1), d.net.toFixed(1),
               d.rate != null ? d.rate.toFixed(2) : '', d.value != null ? inr(d.value) : '', inr(d.wages),
-              <Tag kind={STATUS[d.agentStatus][0]}>{STATUS[d.agentStatus][1]}</Tag>,
-            ] : [fmtDate(d.date, { year: false, dow: true }), d.fieldName, d.agentName, d.gross.toFixed(1), d.ded.toFixed(1), d.net.toFixed(1), d.workers.map((w) => books.nameOf(w.workerId)).join(', ')],
+              <Tag kind={STATUS[d.agentStatus][0]}>{STATUS[d.agentStatus][1]}</Tag>, photoBadge(d),
+            ] : [fmtDate(d.date, { year: false, dow: true }), d.fieldName, d.agentName, d.gross.toFixed(1), d.ded.toFixed(1), d.net.toFixed(1), d.workers.map((w) => books.nameOf(w.workerId)).join(', '), photoBadge(d)],
           }))}
           foot={can.money
-            ? ['Total', `${rows.length} days`, '', sum(rows, (d) => d.gross).toFixed(1), sum(rows, (d) => d.ded).toFixed(1), sum(rows, (d) => d.net).toFixed(1), '', inr(sum(rated, (d) => d.value)), inr(sum(rows, (d) => d.wages)), '']
-            : ['Total', `${rows.length} days`, '', sum(rows, (d) => d.gross).toFixed(1), sum(rows, (d) => d.ded).toFixed(1), sum(rows, (d) => d.net).toFixed(1), '']}
+            ? ['Total', `${rows.length} days`, '', sum(rows, (d) => d.gross).toFixed(1), sum(rows, (d) => d.ded).toFixed(1), sum(rows, (d) => d.net).toFixed(1), '', inr(sum(rated, (d) => d.value)), inr(sum(rows, (d) => d.wages)), '', '']
+            : ['Total', `${rows.length} days`, '', sum(rows, (d) => d.gross).toFixed(1), sum(rows, (d) => d.ded).toFixed(1), sum(rows, (d) => d.net).toFixed(1), '', '']}
         />
         )}
         {!wide && rows.length === 0 && <Muted>No harvest in this period.</Muted>}
         {!wide && rows.map((d) => (
           <Row key={d.id} top onClick={can.harvest ? () => go('/harvest/' + d.id) : undefined} onDelete={can.harvest ? () => del.delivery(d.id) : undefined} deleteLabel="Delete this harvest"
-            left={<><strong>{fmtDate(d.date, { year: false, dow: true })}</strong> · {d.fieldName} · {d.agentName}</>}
+            left={<><strong>{fmtDate(d.date, { year: false, dow: true })}</strong> · {d.fieldName} · {d.agentName}{photoBadge(d) && <span className="v2-muted" title="Slip photo"> · {photoBadge(d)}</span>}</>}
             sub={<>{d.gross.toFixed(1)} − {d.ded.toFixed(1)} = <strong style={{ color: 'var(--ink)' }}>{d.net.toFixed(1)} kg</strong>{can.money ? <> · wages {inr(d.wages)}{d.value != null ? <> · ₹{d.rate.toFixed(2)} = {inr(d.value)}</> : null}</> : <> · {d.workers.map((w) => books.nameOf(w.workerId)).join(', ')}</>}</>}
             right={can.money ? <Tag kind={STATUS[d.agentStatus][0]}>{STATUS[d.agentStatus][1]}</Tag> : null} />
         ))}
