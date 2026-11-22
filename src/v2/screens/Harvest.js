@@ -140,7 +140,7 @@ export default function Harvest({ id, query }) {
       const path = await svc.keepPhoto(await svc.shrink(file), f.date);
       set('slipPath', path);
       say(existing ? 'Photo attached. Press Save changes to keep it.' : 'Photo attached');
-    } catch (e) { say('The photo could not be stored: ' + (e.code || e.message || 'unknown error'), true); }
+    } catch (e) { const svc = await import('../data/slipService'); say('The photo could not be stored: ' + svc.photoError(e), true); }
     setPhotoBusy(false);
     if (fileRef.current) fileRef.current.value = '';
   };

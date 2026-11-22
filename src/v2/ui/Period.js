@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Chips, DateField } from './kit';
 import { periodFor, addDays, fmtDate } from '../core/util';
 
-const PRESETS = [['week', 'This week'], ['month', 'This month'], ['lastMonth', 'Last month'], ['year', 'This year'], ['lastYear', 'Last year'], ['all', 'All'], ['custom', 'Dates']];
+const PRESETS = [['week', 'This week'], ['lastWeek', 'Last week'], ['month', 'This month'], ['lastMonth', 'Last month'], ['year', 'This year'], ['lastYear', 'Last year'], ['all', 'All'], ['custom', 'Dates']];
 
 // Monday–Sunday week containing the date
 const weekOf = (today) => {
@@ -16,7 +16,7 @@ export function usePeriod(today, initial = 'year') {
   const [custom, setCustom] = useState({ from: addDays(today, -30), to: today });
   const period = preset === 'custom'
     ? { from: custom.from || '2000-01-01', to: custom.to || '2099-12-31', label: `${fmtDate(custom.from)} – ${fmtDate(custom.to)}` }
-    : preset === 'week' ? weekOf(today) : periodFor(preset, today);
+    : preset === 'week' ? weekOf(today) : preset === 'lastWeek' ? weekOf(addDays(today, -7)) : periodFor(preset, today);
   return { period, preset, setPreset, custom, setCustom };
 }
 

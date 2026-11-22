@@ -6,7 +6,8 @@ import { useData } from '../data/DataContext';
 import { Page, Card, Row, Tag, Field, Num, Text, Select, Btn, Check, Muted, Chips, PayHow, Ask, askOp, back, go, useForm, href } from '../ui/kit';
 import { DIFF_REASONS, KINDS, settledCash } from '../core/books';
 import { paymentOps, removeEntryOps } from '../data/actions';
-import { inr, num, r2, sum, fmtDate, fmtMonth, monthKey, addMonths, uid } from '../core/util';
+import { usePeriod, PeriodPicker } from '../ui/Period';
+import { inr, num, r2, sum, fmtDate, fmtMonth, monthKey, addMonths, uid, inRange } from '../core/util';
 
 const TYPES = [['agent', 'Agent'], ['worker', 'Worker'], ['tenant', 'Tenant'], ['bill', 'Unpaid bill'], ['other', 'Something else']];
 const OTHER_KINDS = [
@@ -21,6 +22,7 @@ export default function Payment({ query }) {
   const { books, today, can, run, user, demo, say } = useData();
   const fileRef = useRef(null);
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoErr, setPhotoErr] = useState('');
   const [ask, setAsk] = useState(null);
   const existing = query.entry ? books.entryById.get(query.entry) : null;
   const firstTenancy = books.tenancies.find((t) => t.isActive);
@@ -57,8 +59,16 @@ export default function Payment({ query }) {
     const mine = new Set(existing?.deliveryIds || []);
     return agent.deliveries.filter((d) => mine.has(d.id) || d.agentStatus === 'norate' || ((d.agentStatus === 'due' || d.agentStatus === 'part') && !books.entries.some((e) => e.kind === 'tea_sale' && e.id !== existing?.id && (e.deliveryIds || []).includes(d.id))));
   }, [agent, existing, books]);
-  const picked = f.deliveryIds || openDeliveries.filter((d) => d.agentStatus === 'norate').map((d) => d.id);
-  const pickedRows = openDeliveries.filter((d) => picked.includes(d.id));
+  // which dates to show: changing the period starts the ticks again for those dates
+  const dps = usePeriod(today, 'all');
+  const deliveryPeriod = {
+    ...dps,
+    setPreset: (v) => { dps.setPreset(v); set('deliveryIds', null); },
+    setCustom: (fn) => { dps.setCustom(fn); set('deliveryIds', null); },
+  };
+  const shownDeliveries = openDeliveries.filter((d) => inRange(d.date, dps.period));
+  const picked = f.deliveryIds || shownDeliveries.filter((d) => d.agentStatus === 'norate').map((d) => d.id);
+  const pickedRows = shownDeliveries.filter((d) => picked.includes(d.id));
   const pickedKg = sum(pickedRows, (d) => d.net);
   const sameRate = pickedRows.length && pickedRows.every((d) => d.rate != null && d.rate === pickedRows[0].rate) ? pickedRows[0].rate : null;
   const rate = f.rate !== '' ? num(f.rate) : sameRate || 0;
@@ -108,7 +118,7 @@ export default function Payment({ query }) {
   const save = () => {
     const form = {
       ...f, id: existing?.id, kind, partyId, amount, expected: expected == null ? amount : expected,
-      deliveryIds: kind === 'tea_sale' ? picked : undefined, rate: kind === 'tea_sale' ? rate : undefined,
+      deliveryIds: kind === 'tea_sale' ? pickedRows.map((d) => d.id) : undefined, rate: kind === 'tea_sale' ? rate : undefined,
       advanceRecovered: kind === 'wages' ? advRec : undefined, months: kind === 'rent' ? months : undefined,
       tenancyId: f.type === 'tenant' ? f.tenancyId : undefined, propertyId: f.type === 'tenant' ? tenancy?.propertyId : f.propertyId,
       workId: bill?.kind === 'work' ? bill.refId : undefined, stockId: bill?.kind === 'stock' ? bill.refId : undefined,
@@ -135,13 +145,15 @@ export default function Payment({ query }) {
   // ── optional photo (receipt, signed slip, UPI screen), kept for reference ──
   const onPhoto = async (file) => {
     if (!file) return;
-    setPhotoBusy(true);
+    setPhotoBusy(true); setPhotoErr('');
     try {
       const svc = await import('../data/slipService');
-      const path = await svc.keepPhoto(await svc.shrink(file), f.date, 'payments');
-      set('photoPath', path);
-      say(existing ? 'Photo attached. Press Save changes to keep it.' : 'Photo attached');
-    } catch (e) { say('The photo could not be stored: ' + (e.code || e.message || 'unknown error'), true); }
+      try {
+        const path = await svc.keepPhoto(await svc.shrink(file), f.date, 'payments');
+        set('photoPath', path);
+        say(existing ? 'Photo attached. Press Save changes to keep it.' : 'Photo attached. It is kept when you save the payment.');
+      } catch (e) { const msg = 'The photo could not be stored: ' + svc.photoError(e); setPhotoErr(msg); say(msg, true); }
+    } catch (e) { setPhotoErr('The photo could not be stored: ' + (e.message || 'unknown error')); }
     setPhotoBusy(false);
   };
   const viewPhoto = async () => {
@@ -165,7 +177,16 @@ export default function Payment({ query }) {
         {agent && (
           <Card title="Which deliveries is this payment for?">
             {openDeliveries.length === 0 && <Muted>No unpaid deliveries for {agent.name}. You can still record money received; it will reduce what {agent.name} owes.</Muted>}
-            {openDeliveries.map((d) => (
+            {openDeliveries.length > 0 && (<>
+              <PeriodPicker state={deliveryPeriod} presets={['all', 'week', 'lastWeek', 'month', 'lastMonth', 'custom']} />
+              <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button type="button" className="v2-link" onClick={() => set('deliveryIds', shownDeliveries.map((d) => d.id))}>Tick all</button>
+                <button type="button" className="v2-link" onClick={() => set('deliveryIds', [])}>Untick all</button>
+                <span className="v2-muted">{pickedRows.length} of {shownDeliveries.length} ticked{shownDeliveries.length < openDeliveries.length ? ` · ${openDeliveries.length - shownDeliveries.length} outside these dates` : ''}</span>
+              </div>
+              {shownDeliveries.length === 0 && <Muted>No unpaid deliveries in these dates.</Muted>}
+            </>)}
+            {shownDeliveries.map((d) => (
               <label key={d.id} className="v2-row" style={{ cursor: 'pointer' }}>
                 <span className="v2-check" style={{ minHeight: 0 }}>
                   <input type="checkbox" checked={picked.includes(d.id)} onChange={(e) => set('deliveryIds', e.target.checked ? [...picked, d.id] : picked.filter((x) => x !== d.id))} />
@@ -268,6 +289,7 @@ export default function Payment({ query }) {
       <Card title="Photo, kept for reference (optional)">
         {f.photoPath ? <Row left="A photo is attached" right={<span><button type="button" className="v2-link" onClick={viewPhoto}>View</button>{' · '}<button type="button" className="v2-link" onClick={() => set('photoPath', '')}>Remove</button></span>} />
           : <Muted>{f.type === 'agent' ? 'For example the agent\'s bill or the payment screen.' : f.type === 'worker' ? 'For example the signed wage slip or the payment screen.' : 'For example the receipt or the payment screen.'} Nothing is read from it.</Muted>}
+        {photoErr && <div className="v2-muted" role="alert" style={{ color: 'var(--red)' }}>{photoErr}</div>}
         <Btn kind="sec" disabled={photoBusy} onClick={() => (demo ? say('Photos cannot be stored on sample data.', true) : fileRef.current.click())}>{photoBusy ? 'Storing the photo…' : f.photoPath ? 'Replace the photo' : 'Take or choose a photo'}</Btn>
       </Card>
 
