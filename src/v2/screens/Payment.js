@@ -22,6 +22,7 @@ const typeOfKind = (k) => (k === 'tea_sale' ? 'agent' : k === 'wages' || k === '
 
 export default function Payment({ query }) {
   const { books, today, can, run, user } = useData();
+  const doneTo = query.from === 'tea' ? '/tea/payments' : '/reports/entries';
   const [ask, setAsk] = useState(null);
   const existing = query.entry ? books.entryById.get(query.entry) : null;
   const firstTenancy = books.tenancies.find((t) => t.isActive);
@@ -134,12 +135,12 @@ export default function Payment({ query }) {
     if (kind === 'lease_deposit_return' && !f.leaseId) return run({ error: 'Choose the lease.' });
     const res = paymentOps(form, books);
     if (!res.error) res.ops.push(...askOp(ask, { id: uid(), link: `/pay?entry=${res.id}`, about: `${KINDS[kind]?.cat || 'Payment'} · ${fmtDate(f.date)} · ${inr(amount)}`, by: user?.displayName || user?.email || '', date: today }));
-    if (run(res, existing ? 'Payment updated' : ask?.who ? `Payment saved and ${ask.who} asked` : 'Payment saved')) { if (existing) back('/reports/entries'); else go('/reports/entries'); }
+    if (run(res, existing ? 'Payment updated' : ask?.who ? `Payment saved and ${ask.who} asked` : 'Payment saved')) { if (existing) back(doneTo); else go(doneTo); }
     return null;
   };
   const remove = () => {
     if (!window.confirm('Move this payment to the recycle bin?' + (existing.kind === 'tea_sale' && (existing.deliveryIds || []).length ? '\n\nIts deliveries will go back to "rate not known".' : ''))) return;
-    if (run(removeEntryOps(existing.id, books), 'Moved to the recycle bin')) back('/reports/entries');
+    if (run(removeEntryOps(existing.id, books), 'Moved to the recycle bin')) back(doneTo);
   };
   const reset = (patch) => setAll((x) => ({ ...x, amount: '', touched: false, deliveryIds: null, months: null, advanceRecovered: null, rate: '', diffReason: '', diffComment: '', ...patch }));
 
@@ -147,7 +148,7 @@ export default function Payment({ query }) {
   if (query.entry && !existing) return <Page title="Payment" backTo="/reports/entries"><Card><Muted>This payment is not there any more. It may be in the recycle bin.</Muted></Card></Page>;
 
   return (
-    <Page title={existing ? 'Edit payment' : 'Record a payment'} narrow backTo="/">
+    <Page title={existing ? 'Edit payment' : 'Record a payment'} narrow backTo={query.from === 'tea' ? '/tea/payments' : '/'}>
       {!existing && (<>
         <div className="v2-flab">Who is it with?</div>
         <Chips label="Who is it with" options={TYPES} value={f.type} onChange={(v) => reset({ type: v, partyId: '', billId: '', kind: v === 'agent' ? 'tea_sale' : v === 'worker' ? 'wages' : v === 'tenant' ? 'rent' : v === 'other' ? 'misc' : '' })} />

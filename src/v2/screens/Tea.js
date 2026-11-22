@@ -4,21 +4,28 @@ import { Page, Card, Row, Tag, Money, Tabs, Table, Select, Muted, Btn, Field, Te
 import { usePeriod, PeriodPicker } from '../ui/Period';
 import { inr, inRange, sum, fmtDate, num, r2, daysBetween } from '../core/util';
 import { photoBadge } from '../core/photos';
-import { DIFF_LABEL } from '../core/books';
+import { DIFF_LABEL, MODE_LABEL } from '../core/books';
 import { deliveriesCSV } from '../core/backup';
 import { equipmentOps, removeWithPayments } from '../data/actions';
 import { useDelete } from '../data/useDelete';
 
 const STATUS = { paid: ['g', 'Agent paid'], part: ['', 'Part paid'], due: ['', 'Agent to pay'], norate: ['', 'Rate not known'] };
-const TABS = [['harvest', 'Harvest'], ['account', 'Tea account'], ['fields', 'Fields'], ['people', 'People'], ['equipment', 'Equipment']];
+const TABS = [['harvest', 'Harvest'], ['payments', 'Payments'], ['account', 'Tea account'], ['fields', 'Fields'], ['people', 'People'], ['equipment', 'Equipment']];
 
 export default function Tea({ tab = 'harvest' }) {
   const { can } = useData();
   const tabs = can.money ? TABS : TABS.filter(([k]) => k === 'harvest' || k === 'fields');
   return (
     <Page title="Tea" right={can.harvest && <a className="v2-btn sm" href={href('/harvest')}>+ Harvest day</a>}>
+      {can.write && (
+        <div style={{ display: 'flex', gap: 8 }}>
+          <a className="v2-btn sec sm" style={{ flex: 1 }} href={href('/pay', { type: 'agent', from: 'tea' })}>+ Agent payment</a>
+          <a className="v2-btn sec sm" style={{ flex: 1 }} href={href('/pay', { type: 'worker', kind: 'wages', from: 'tea' })}>+ Pay a worker</a>
+        </div>
+      )}
       <Tabs tabs={tabs} value={tab} onChange={(t) => go('/tea/' + t)} />
       {tab === 'harvest' && <HarvestLog />}
+      {tab === 'payments' && can.money && <TeaPayments />}
       {tab === 'account' && can.money && <Account />}
       {tab === 'fields' && <Fields />}
       {tab === 'people' && can.money && <People />}
@@ -82,6 +89,73 @@ function HarvestLog() {
           </div>
         )}
         {can.money && unratedKg > 0 && <Muted>{unratedKg.toFixed(1)} kg is waiting for a rate, so it is not in the money total yet.</Muted>}
+      </Card>
+    </>
+  );
+}
+
+// Agent and worker payments in one place: who is waiting, with one tap to pay,
+// then every agent payment, wage, and advance in the period.
+const PAY_KINDS = { tea_sale: 'Agent paid', wages: 'Wages', advance: 'Advance' };
+function TeaPayments() {
+  const { books, today, can } = useData();
+  const wide = useWide();
+  const ps = usePeriod(today, 'month');
+  const [who, setWho] = useState('all');
+  const [partyId, setParty] = useState('');
+  const agentsWaiting = books.agents.filter((a) => a.unratedKg > 0 || a.balance > 0.5);
+  const workersDue = books.workers.filter((w) => w.due > 0.5);
+  const people = who === 'agent' ? books.agents : who === 'worker' ? books.workers : [...books.agents, ...books.workers];
+  const rows = books.entries.filter((e) => PAY_KINDS[e.kind] && inRange(e.date, ps.period)
+    && (who === 'all' || (who === 'agent') === (e.kind === 'tea_sale')) && (!partyId || e.partyId === partyId));
+  const open = (e) => { if (can.write) go('/pay', { entry: e.id, from: 'tea' }); };
+  const inTotal = sum(rows.filter((e) => e.kind === 'tea_sale'), (e) => e.amount);
+  const outTotal = sum(rows.filter((e) => e.kind !== 'tea_sale'), (e) => e.amount);
+  return (
+    <>
+      <div className="v2-two">
+        <Card title="Agents to pay us">
+          {agentsWaiting.map((a) => (
+            <Row key={a.id} top to={can.write ? href('/pay', { type: 'agent', party: a.id, from: 'tea' }) : undefined}
+              left={<strong>{a.name}</strong>}
+              sub={[a.unratedKg > 0 ? `${a.unratedKg.toFixed(1)} kg waiting for a rate` : '', a.unrated.length ? `oldest ${fmtDate(a.unrated[0].date, { year: false })}` : ''].filter(Boolean).join(' · ')}
+              right={<Tag>{a.balance > 0.5 ? <><Money v={a.balance} /> owed</> : 'Record payment'}</Tag>} />
+          ))}
+          {agentsWaiting.length === 0 && <Muted>Every agent has paid.</Muted>}
+        </Card>
+        <Card title="Workers to pay">
+          {workersDue.map((w) => (
+            <Row key={w.id} top to={can.write ? href('/pay', { type: 'worker', kind: 'wages', party: w.id, from: 'tea' }) : undefined}
+              left={<strong>{w.name}</strong>}
+              sub={[`${w.unpaidDays} unpaid ${w.unpaidDays === 1 ? 'day' : 'days'} · ${w.unpaidKg.toFixed(1)} kg`, w.advanceBalance > 0.5 ? `advance owed ${inr(w.advanceBalance)}` : ''].filter(Boolean).join(' · ')}
+              right={<Tag>Pay <Money v={w.due} /></Tag>} />
+          ))}
+          {workersDue.length === 0 && <Muted>All wages are paid.</Muted>}
+          {workersDue.length > 1 && <Row left={<strong>Total wages due</strong>} right={<strong><Money v={sum(workersDue, (w) => w.due)} /></strong>} />}
+        </Card>
+      </div>
+
+      <PeriodPicker state={ps} />
+      <div className="v2-cols">
+        <Select aria-label="Agents or workers" value={who} onChange={(v) => { setWho(v); setParty(''); }} options={[['all', 'All'], ['agent', 'Agents'], ['worker', 'Workers']]} />
+        <Select aria-label="Person" value={partyId} onChange={setParty} options={people.map((p) => [p.id, p.name])} placeholder="Everyone" />
+      </div>
+      <Card title={`Payments · ${ps.period.label}${can.write ? ' · tap one to change it' : ''}`}>
+        {wide ? (
+          <Table head={['Date', 'With', 'What', { label: 'Received', r: 1 }, { label: 'Paid', r: 1 }, 'How', 'Handled by', 'Note']} empty="No agent or worker payments in this period."
+            onRow={can.write ? (r) => open(r.e) : undefined}
+            rows={rows.map((e) => ({ key: e.id, e, cells: [fmtDate(e.date, { year: false, dow: true }), e.party, e.kind === 'tea_sale' ? e.forText : PAY_KINDS[e.kind], e.dir === 'in' ? inr(e.amount) : '', e.dir === 'out' ? inr(e.amount) : '', MODE_LABEL[e.mode] || '', e.by || '', [photoBadge(e), e.diffComment, e.note].filter(Boolean).join(' · ')] }))}
+            foot={['Total', `${rows.length} payments`, '', inr(inTotal), inr(outTotal), '', '', '']} />
+        ) : (<>
+          {rows.length === 0 && <Muted>No agent or worker payments in this period.</Muted>}
+          {rows.map((e) => (
+            <Row key={e.id} top onClick={can.write ? () => open(e) : undefined}
+              left={<><strong>{e.party}</strong> · {e.kind === 'tea_sale' ? e.forText : PAY_KINDS[e.kind]}</>}
+              sub={[fmtDate(e.date, { year: false, dow: true }), e.by, photoBadge(e), e.diffComment || e.note].filter(Boolean).join(' · ')}
+              right={<span className={e.dir === 'in' ? 'v2-green' : ''} style={{ fontWeight: 600 }}>{inr(e.signed, { sign: true })}</span>} />
+          ))}
+          {rows.length > 0 && <Row left={<strong>{rows.length} payments</strong>} right={<strong>in {inr(inTotal)} · out {inr(outTotal)}</strong>} />}
+        </>)}
       </Card>
     </>
   );

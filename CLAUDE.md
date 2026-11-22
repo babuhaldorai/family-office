@@ -41,7 +41,7 @@ REACT_APP_DEMO=1 CI=true npx react-scripts build
 Then serve `build/` on port 4173 and run `scripts/smoke-sample.js` and `scripts/e2e-sample*.js`
 with Playwright. Sample mode uses made-up data in memory and never touches Firebase.
 `scripts/rules-emulator-test.js` checks the database rules on the Firestore emulator.
-Sample tests: `smoke-sample.js`, `e2e-sample.js` to `e2e-sample-5.js`.
+Sample tests: `smoke-sample.js`, `e2e-sample.js` to `e2e-sample-6.js`.
 
 ## Decisions the owner made (do not undo without asking)
 - Harvest form is laid out like the paper slip: one block per worker with bags, then that worker's
@@ -67,6 +67,9 @@ Sample tests: `smoke-sample.js`, `e2e-sample.js` to `e2e-sample-5.js`.
 - Harvest form has "To do from this harvest": each to-do is a `fo_notes` todo for a chosen person
   (default: the person picked on Home, else the first handler), naming field, day and optional worker,
   linked to `/harvest/<id>`; open ones show on that harvest with Done.
+- Tea has "+ Agent payment" and "+ Pay a worker" at the top of every tab, and a Payments tab (who is
+  waiting, one tap to pay, list of agent/worker payments). Payments opened from Tea (`from=tea`)
+  return to Tea → Payments after saving.
 - AI summaries: off by default; the Owner switches them on and picks who may use them; at most 2 a day.
 - Backups: every night, only if something changed, to the storage bucket and a private GitHub repo.
 - Reminder emails: per address, each person gets one combined email (rent not logged, their action
